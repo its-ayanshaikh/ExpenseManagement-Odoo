@@ -1,0 +1,262 @@
+import { Knex } from 'knex';
+import { ApprovalRequestStatus } from '../types/database';
+
+export async function seed(knex: Knex): Promise<void> {
+  // Clear existing data
+  await knex('approval_requests').del();
+
+  // Sample approval requests for pending and processed expenses
+  const approvalRequests = [
+    // Approval requests for expense-1-uuid (PENDING)
+    {
+      id: 'approval-req-1-uuid',
+      expense_id: 'expense-1-uuid',
+      approver_id: 'manager-1-uuid',
+      sequence: 1,
+      status: ApprovalRequestStatus.PENDING,
+      comments: null,
+      responded_at: null,
+      created_at: new Date('2024-03-01T10:05:00Z'),
+      updated_at: new Date('2024-03-01T10:05:00Z'),
+    },
+
+    // Approval requests for expense-2-uuid (APPROVED)
+    {
+      id: 'approval-req-2-uuid',
+      expense_id: 'expense-2-uuid',
+      approver_id: 'manager-1-uuid',
+      sequence: 1,
+      status: ApprovalRequestStatus.APPROVED,
+      comments: 'Approved - necessary office equipment',
+      responded_at: new Date('2024-03-01T15:30:00Z'),
+      created_at: new Date('2024-02-28T14:35:00Z'),
+      updated_at: new Date('2024-03-01T15:30:00Z'),
+    },
+    {
+      id: 'approval-req-3-uuid',
+      expense_id: 'expense-2-uuid',
+      approver_id: 'admin-1-uuid',
+      sequence: 2,
+      status: ApprovalRequestStatus.APPROVED,
+      comments: 'Final approval granted',
+      responded_at: new Date('2024-03-02T09:15:00Z'),
+      created_at: new Date('2024-03-01T15:35:00Z'),
+      updated_at: new Date('2024-03-02T09:15:00Z'),
+    },
+
+    // Approval requests for expense-3-uuid (REJECTED)
+    {
+      id: 'approval-req-4-uuid',
+      expense_id: 'expense-3-uuid',
+      approver_id: 'manager-1-uuid',
+      sequence: 1,
+      status: ApprovalRequestStatus.REJECTED,
+      comments: 'Receipt required for meal expenses over $40',
+      responded_at: new Date('2024-03-03T11:20:00Z'),
+      created_at: new Date('2024-03-02T12:05:00Z'),
+      updated_at: new Date('2024-03-03T11:20:00Z'),
+    },
+
+    // Approval requests for expense-4-uuid (PENDING)
+    {
+      id: 'approval-req-5-uuid',
+      expense_id: 'expense-4-uuid',
+      approver_id: 'manager-2-uuid',
+      sequence: 1,
+      status: ApprovalRequestStatus.PENDING,
+      comments: null,
+      responded_at: null,
+      created_at: new Date('2024-03-01T16:50:00Z'),
+      updated_at: new Date('2024-03-01T16:50:00Z'),
+    },
+
+    // Approval requests for expense-5-uuid (APPROVED)
+    {
+      id: 'approval-req-6-uuid',
+      expense_id: 'expense-5-uuid',
+      approver_id: 'manager-2-uuid',
+      sequence: 1,
+      status: ApprovalRequestStatus.APPROVED,
+      comments: 'Travel expense approved',
+      responded_at: new Date('2024-02-26T14:20:00Z'),
+      created_at: new Date('2024-02-25T08:35:00Z'),
+      updated_at: new Date('2024-02-26T14:20:00Z'),
+    },
+    {
+      id: 'approval-req-7-uuid',
+      expense_id: 'expense-5-uuid',
+      approver_id: 'admin-1-uuid',
+      sequence: 2,
+      status: ApprovalRequestStatus.APPROVED,
+      comments: 'Currency conversion looks correct',
+      responded_at: new Date('2024-02-27T10:00:00Z'),
+      created_at: new Date('2024-02-26T14:25:00Z'),
+      updated_at: new Date('2024-02-27T10:00:00Z'),
+    },
+
+    // Approval requests for expense-6-uuid (PENDING - high value)
+    {
+      id: 'approval-req-8-uuid',
+      expense_id: 'expense-6-uuid',
+      approver_id: 'manager-1-uuid',
+      sequence: 1,
+      status: ApprovalRequestStatus.PENDING,
+      comments: null,
+      responded_at: null,
+      created_at: new Date('2024-03-03T09:05:00Z'),
+      updated_at: new Date('2024-03-03T09:05:00Z'),
+    },
+
+    // Approval requests for expense-7-uuid (APPROVED - UK company)
+    {
+      id: 'approval-req-9-uuid',
+      expense_id: 'expense-7-uuid',
+      approver_id: 'manager-3-uuid',
+      sequence: 1,
+      status: ApprovalRequestStatus.APPROVED,
+      comments: 'Standard travel expense',
+      responded_at: new Date('2024-03-02T14:20:00Z'),
+      created_at: new Date('2024-03-01T07:35:00Z'),
+      updated_at: new Date('2024-03-02T14:20:00Z'),
+    },
+
+    // Approval requests for expense-8-uuid (PENDING - UK company)
+    {
+      id: 'approval-req-10-uuid',
+      expense_id: 'expense-8-uuid',
+      approver_id: 'manager-3-uuid',
+      sequence: 1,
+      status: ApprovalRequestStatus.PENDING,
+      comments: null,
+      responded_at: null,
+      created_at: new Date('2024-02-29T11:20:00Z'),
+      updated_at: new Date('2024-02-29T11:20:00Z'),
+    },
+
+    // Approval requests for expense-9-uuid (REJECTED - UK company)
+    {
+      id: 'approval-req-11-uuid',
+      expense_id: 'expense-9-uuid',
+      approver_id: 'manager-3-uuid',
+      sequence: 1,
+      status: ApprovalRequestStatus.REJECTED,
+      comments: 'Team lunch should be pre-approved for reimbursement',
+      responded_at: new Date('2024-03-04T10:30:00Z'),
+      created_at: new Date('2024-03-02T13:05:00Z'),
+      updated_at: new Date('2024-03-04T10:30:00Z'),
+    },
+
+    // Approval requests for expense-10-uuid (APPROVED - Canada company)
+    {
+      id: 'approval-req-12-uuid',
+      expense_id: 'expense-10-uuid',
+      approver_id: 'manager-4-uuid',
+      sequence: 1,
+      status: ApprovalRequestStatus.APPROVED,
+      comments: 'Office supplies approved',
+      responded_at: new Date('2024-03-02T16:30:00Z'),
+      created_at: new Date('2024-03-01T15:25:00Z'),
+      updated_at: new Date('2024-03-02T16:30:00Z'),
+    },
+    {
+      id: 'approval-req-13-uuid',
+      expense_id: 'expense-10-uuid',
+      approver_id: 'admin-3-uuid',
+      sequence: 2,
+      status: ApprovalRequestStatus.APPROVED,
+      comments: 'Final approval',
+      responded_at: new Date('2024-03-03T08:45:00Z'),
+      created_at: new Date('2024-03-02T16:35:00Z'),
+      updated_at: new Date('2024-03-03T08:45:00Z'),
+    },
+
+    // Approval requests for expense-11-uuid (PENDING - Canada company)
+    {
+      id: 'approval-req-14-uuid',
+      expense_id: 'expense-11-uuid',
+      approver_id: 'manager-4-uuid',
+      sequence: 1,
+      status: ApprovalRequestStatus.PENDING,
+      comments: null,
+      responded_at: null,
+      created_at: new Date('2024-03-04T10:05:00Z'),
+      updated_at: new Date('2024-03-04T10:05:00Z'),
+    },
+
+    // Approval requests for expense-12-uuid (APPROVED - multi-step)
+    {
+      id: 'approval-req-15-uuid',
+      expense_id: 'expense-12-uuid',
+      approver_id: 'manager-1-uuid',
+      sequence: 1,
+      status: ApprovalRequestStatus.APPROVED,
+      comments: 'Travel accommodation approved',
+      responded_at: new Date('2024-02-21T10:15:00Z'),
+      created_at: new Date('2024-02-20T18:05:00Z'),
+      updated_at: new Date('2024-02-21T10:15:00Z'),
+    },
+    {
+      id: 'approval-req-16-uuid',
+      expense_id: 'expense-12-uuid',
+      approver_id: 'manager-2-uuid',
+      sequence: 2,
+      status: ApprovalRequestStatus.APPROVED,
+      comments: 'Secondary approval granted',
+      responded_at: new Date('2024-02-21T14:45:00Z'),
+      created_at: new Date('2024-02-21T10:20:00Z'),
+      updated_at: new Date('2024-02-21T14:45:00Z'),
+    },
+    {
+      id: 'approval-req-17-uuid',
+      expense_id: 'expense-12-uuid',
+      approver_id: 'admin-1-uuid',
+      sequence: 3,
+      status: ApprovalRequestStatus.APPROVED,
+      comments: 'Final approval for international travel',
+      responded_at: new Date('2024-02-22T09:30:00Z'),
+      created_at: new Date('2024-02-21T14:50:00Z'),
+      updated_at: new Date('2024-02-22T09:30:00Z'),
+    },
+
+    // Approval requests for expense-13-uuid (PENDING)
+    {
+      id: 'approval-req-18-uuid',
+      expense_id: 'expense-13-uuid',
+      approver_id: 'manager-2-uuid',
+      sequence: 1,
+      status: ApprovalRequestStatus.PENDING,
+      comments: null,
+      responded_at: null,
+      created_at: new Date('2024-03-05T11:35:00Z'),
+      updated_at: new Date('2024-03-05T11:35:00Z'),
+    },
+
+    // Approval requests for expense-14-uuid (REJECTED - UK company)
+    {
+      id: 'approval-req-19-uuid',
+      expense_id: 'expense-14-uuid',
+      approver_id: 'manager-3-uuid',
+      sequence: 1,
+      status: ApprovalRequestStatus.REJECTED,
+      comments: 'Equipment purchase requires pre-approval for amounts over £400',
+      responded_at: new Date('2024-02-18T16:45:00Z'),
+      created_at: new Date('2024-02-15T14:05:00Z'),
+      updated_at: new Date('2024-02-18T16:45:00Z'),
+    },
+
+    // Approval requests for expense-15-uuid (PENDING - Canada company)
+    {
+      id: 'approval-req-20-uuid',
+      expense_id: 'expense-15-uuid',
+      approver_id: 'manager-4-uuid',
+      sequence: 1,
+      status: ApprovalRequestStatus.PENDING,
+      comments: null,
+      responded_at: null,
+      created_at: new Date('2024-03-06T19:35:00Z'),
+      updated_at: new Date('2024-03-06T19:35:00Z'),
+    },
+  ];
+
+  await knex('approval_requests').insert(approvalRequests);
+}
