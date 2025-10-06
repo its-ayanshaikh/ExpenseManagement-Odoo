@@ -37,6 +37,7 @@ app.use('/api/approval-rules', approvalRuleRoutes);
 app.use('/api/currencies', currencyRoutes);
 app.use('/api/ocr', ocrRoutes);
 
+// Health check endpoints
 app.get('/health', async (_req, res) => {
   const dbHealthy = await checkDatabaseConnection();
   const redisHealthy = redisClient.isClientConnected();
@@ -46,6 +47,22 @@ app.get('/health', async (_req, res) => {
     message: 'Expense Management System API',
     database: dbHealthy ? 'connected' : 'disconnected',
     redis: redisHealthy ? 'connected' : 'disconnected',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+  });
+});
+
+app.get('/api/health', async (_req, res) => {
+  const dbHealthy = await checkDatabaseConnection();
+  const redisHealthy = redisClient.isClientConnected();
+  
+  res.json({
+    status: dbHealthy && redisHealthy ? 'ok' : 'degraded',
+    message: 'Expense Management System API',
+    database: dbHealthy ? 'connected' : 'disconnected',
+    redis: redisHealthy ? 'connected' : 'disconnected',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
   });
 });
 
@@ -64,20 +81,26 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
-app.listen(config.port, async () => {
-  // Log environment status
-  logEnvironmentStatus();
-  
-  console.log(`🚀 Server running on port ${config.port}`);
-  console.log(`📊 Environment: ${config.nodeEnv}`);
-  
-  await checkDatabaseConnection();
-  
-  // Initialize Redis connection (non-blocking)
-  try {
-    await redisClient.connect();
-    console.log('✅ Redis connected successfully');
-  } catch (error) {
-    console.warn('⚠️  Redis connection failed, continuing without cache:', error);
-  }
-});
+// Export app for testing
+export { app };
+
+// Only start server if not in test mode
+if (require.main === module) {
+  app.listen(config.port, async () => {
+    // Log environment status
+    logEnvironmentStatus();
+    
+    console.log(`🚀 Server running on port ${config.port}`);
+    console.log(`📊 Environment: ${config.nodeEnv}`);
+    
+    await checkDatabaseConnection();
+    
+    // Initialize Redis connection (non-blocking)
+    try {
+      await redisClient.connect();
+      console.log('✅ Redis connected successfully');
+    } catch (error) {
+      console.warn('⚠️  Redis connection failed, continuing without cache:', error);
+    }
+  });
+}

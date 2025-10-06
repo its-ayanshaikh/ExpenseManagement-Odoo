@@ -53,15 +53,15 @@ const SignupPage: React.FC = () => {
       try {
         setLoadingCountries(true)
         const countriesData = await currencyService.getCountriesWithCurrencies()
-        setCountries(countriesData.sort((a, b) => a.name.localeCompare(b.name)))
+        setCountries(countriesData.sort((a, b) => a.countryName.localeCompare(b.countryName)))
       } catch (err) {
         console.error('Failed to fetch countries:', err)
         // Set a fallback list of common countries if API fails
         setCountries([
-          { name: 'United States', code: 'US', currency: { code: 'USD', name: 'US Dollar', symbol: '$' } },
-          { name: 'United Kingdom', code: 'GB', currency: { code: 'GBP', name: 'British Pound', symbol: '£' } },
-          { name: 'Canada', code: 'CA', currency: { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$' } },
-          { name: 'Australia', code: 'AU', currency: { code: 'AUD', name: 'Australian Dollar', symbol: 'A$' } },
+          { countryName: 'United States', countryCode: 'US', currencies: [{ code: 'USD', name: 'US Dollar', symbol: '$' }] },
+          { countryName: 'United Kingdom', countryCode: 'GB', currencies: [{ code: 'GBP', name: 'British Pound', symbol: '£' }] },
+          { countryName: 'Canada', countryCode: 'CA', currencies: [{ code: 'CAD', name: 'Canadian Dollar', symbol: 'C$' }] },
+          { countryName: 'Australia', countryCode: 'AU', currencies: [{ code: 'AUD', name: 'Australian Dollar', symbol: 'A$' }] },
         ])
       } finally {
         setLoadingCountries(false)
@@ -80,13 +80,18 @@ const SignupPage: React.FC = () => {
     try {
       clearError()
       
+      // Find the selected country to get its currency
+      const selectedCountry = countries.find(c => c.countryCode === data.country)
+      const currencyCode = selectedCountry?.currencies[0]?.code || 'USD'
+      
       const signupData = {
         email: data.email,
         password: data.password,
         firstName: data.firstName,
         lastName: data.lastName,
         companyName: data.companyName,
-        countryCode: data.country,
+        country: selectedCountry?.countryName || data.country,
+        currencyCode: currencyCode,
       }
 
       await signup(signupData)
@@ -242,8 +247,8 @@ const SignupPage: React.FC = () => {
                   {loadingCountries ? 'Loading countries...' : 'Select your country'}
                 </option>
                 {countries.map((country) => (
-                  <option key={country.code} value={country.code}>
-                    {country.name} ({country.currency.code})
+                  <option key={country.countryCode} value={country.countryCode}>
+                    {country.countryName} ({country.currencies[0]?.code || 'N/A'})
                   </option>
                 ))}
               </select>

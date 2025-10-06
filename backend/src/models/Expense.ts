@@ -28,7 +28,7 @@ export class Expense {
     this.description = data.description || '';
     this.expenseDate = data.expense_date || new Date();
     this.receiptUrl = data.receipt_url || null;
-    this.status = data.status || ExpenseStatus.PENDING;
+    this.status = data.status || ExpenseStatus.DRAFT;
     this.convertedAmount = data.converted_amount || 0;
     this.convertedCurrency = data.converted_currency || '';
     this.createdAt = data.created_at || new Date();

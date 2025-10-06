@@ -90,9 +90,11 @@ const ExpenseSubmissionForm: React.FC<ExpenseSubmissionFormProps> = ({ onSuccess
         setCountries(countriesData)
         
         // Set USD as default currency if available
-        const usdCountry = countriesData.find(c => c.currency.code === 'USD')
+        const usdCountry = countriesData.find(c => 
+          c.currencies.some(curr => curr.code === 'USD')
+        )
         if (usdCountry) {
-          setValue('currency', usdCountry.currency.code)
+          setValue('currency', 'USD')
         }
       } catch (error) {
         handleError(error, 'Loading countries')
@@ -321,9 +323,22 @@ const ExpenseSubmissionForm: React.FC<ExpenseSubmissionFormProps> = ({ onSuccess
                 onChange={(value) => setValue('currency', value)}
                 error={errors.currency?.message}
                 placeholder="Select currency"
-                options={countries.map(country => ({
-                  value: country.currency.code,
-                  label: `${country.currency.code} - ${country.currency.name} (${country.currency.symbol})`
+                options={Array.from(
+                  new Map(
+                    countries
+                      .flatMap(country => 
+                        country.currencies.map(currency => ({
+                          code: currency.code,
+                          name: currency.name,
+                          symbol: currency.symbol || currency.code,
+                          countryName: country.countryName
+                        }))
+                      )
+                      .map(curr => [curr.code, curr])
+                  ).values()
+                ).map(currency => ({
+                  value: currency.code,
+                  label: `${currency.code} - ${currency.name} (${currency.symbol})`
                 }))}
               />
             </div>

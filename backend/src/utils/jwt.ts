@@ -16,10 +16,10 @@ export interface TokenPair {
 }
 
 // JWT configuration
-const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'your-access-secret-key';
+const JWT_ACCESS_SECRET = process.env.JWT_SECRET || process.env.JWT_ACCESS_SECRET || 'your-access-secret-key';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key';
-const ACCESS_TOKEN_EXPIRES_IN = process.env.ACCESS_TOKEN_EXPIRES_IN || '15m';
-const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || '7d';
+const ACCESS_TOKEN_EXPIRES_IN = process.env.JWT_EXPIRES_IN || process.env.ACCESS_TOKEN_EXPIRES_IN || '15m';
+const REFRESH_TOKEN_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || process.env.REFRESH_TOKEN_EXPIRES_IN || '7d';
 
 /**
  * Generate access token for user
@@ -133,12 +133,24 @@ export function extractTokenFromHeader(authHeader: string | undefined): string |
     return null;
   }
 
-  const parts = authHeader.split(' ');
+  // Trim whitespace
+  const trimmedHeader = authHeader.trim();
+  
+  const parts = trimmedHeader.split(' ');
   if (parts.length !== 2 || parts[0] !== 'Bearer') {
     return null;
   }
 
-  return parts[1];
+  // Extract token and remove any surrounding quotes (single or double)
+  let token = parts[1].trim();
+  
+  // Remove surrounding quotes if present
+  if ((token.startsWith('"') && token.endsWith('"')) || 
+      (token.startsWith("'") && token.endsWith("'"))) {
+    token = token.slice(1, -1);
+  }
+
+  return token;
 }
 
 /**

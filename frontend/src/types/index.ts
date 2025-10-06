@@ -115,6 +115,7 @@ export interface ApprovalHistory {
 // API DTOs
 export interface CreateUserDTO {
   email: string
+  password: string
   firstName: string
   lastName: string
   role: UserRole
@@ -179,7 +180,8 @@ export interface SignupData {
   firstName: string
   lastName: string
   companyName: string
-  countryCode: string
+  country: string
+  currencyCode: string
 }
 
 export interface AuthResponse {
@@ -191,13 +193,13 @@ export interface AuthResponse {
 
 // Currency types
 export interface CountryCurrency {
-  name: string
-  code: string
-  currency: {
+  countryName: string
+  countryCode: string
+  currencies: {
     code: string
     name: string
-    symbol: string
-  }
+    symbol?: string
+  }[]
 }
 
 export interface CurrencyConversion {

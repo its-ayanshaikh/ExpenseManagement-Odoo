@@ -2,13 +2,30 @@
 
 A comprehensive expense management system with automated approval workflows, multi-level approvals, OCR receipt scanning, and multi-currency support.
 
+## Features
+
+- 🔐 **Role-Based Access Control** - Admin, Manager, and Employee roles with specific permissions
+- 📝 **Expense Submission** - Submit expenses with multi-currency support
+- 🔄 **Approval Workflows** - Sequential and conditional approval rules
+- 📸 **OCR Receipt Scanning** - Automatic data extraction from receipt images
+- 💱 **Multi-Currency Support** - Real-time currency conversion with caching
+- 📊 **Audit Trail** - Complete tracking of all expense state changes
+- 🎨 **Modern UI** - Responsive React interface with accessibility features
+
 ## Project Structure
 
 ```
 expense-management-system/
 ├── backend/          # Node.js/Express backend
+│   ├── src/         # Source code
+│   ├── dist/        # Compiled JavaScript (production)
+│   └── uploads/     # Receipt uploads
 ├── frontend/         # React frontend
-└── .kiro/           # Kiro specs and configuration
+│   ├── src/         # Source code
+│   └── dist/        # Production build
+├── scripts/         # Build and deployment scripts
+├── .kiro/          # Kiro specs and configuration
+└── docs/           # Additional documentation
 ```
 
 ## Prerequisites
@@ -16,38 +33,96 @@ expense-management-system/
 - Node.js 18+ and npm
 - PostgreSQL 14+
 - Redis 6+
+- Git
 
-## Getting Started
+## Quick Start
 
-### Installation
+### Development Setup
 
-1. Install dependencies for all workspaces:
+1. **Install dependencies:**
 ```bash
 npm run install:all
 ```
 
-2. Set up environment variables:
+2. **Set up environment variables:**
 ```bash
 # Backend
-cp backend/.env.example backend/.env
-# Edit backend/.env with your configuration
+cp backend/.env.example backend/.env.development
+# Edit backend/.env.development with your configuration
 
 # Frontend
-cp frontend/.env.example frontend/.env
-# Edit frontend/.env with your configuration
+cp frontend/.env.example frontend/.env.development
+# Edit frontend/.env.development with your configuration
 ```
 
-3. Set up the database:
+3. **Set up the database:**
 ```bash
 # Create PostgreSQL database
 createdb expense_management
 
-# Run migrations (after implementing task 2)
+# Run migrations
 cd backend
-npm run migrate
+npm run migrate:latest
 ```
 
-### Development
+4. **Seed development data (optional):**
+```bash
+npm run seed:dev
+```
+
+### Running Development Servers
+
+Start both backend and frontend:
+
+```bash
+# Terminal 1 - Backend
+npm run dev:backend
+
+# Terminal 2 - Frontend
+npm run dev:frontend
+```
+
+The application will be available at:
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:3000
+
+## Production Deployment
+
+### Quick Production Build
+
+```bash
+npm run build:prod
+```
+
+This will:
+- Validate environment files
+- Run linters and tests
+- Build backend and frontend
+- Analyze bundle sizes
+
+### Deployment Options
+
+1. **Docker Compose** (Recommended)
+   ```bash
+   docker-compose -f docker-compose.prod.yml up -d
+   ```
+
+2. **Traditional Server with PM2**
+   ```bash
+   npm run build:all
+   pm2 start ecosystem.config.js --env production
+   ```
+
+3. **Cloud Platforms** (Heroku, Railway, Render, etc.)
+   - See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed instructions
+
+### Pre-Deployment Checklist
+
+Before deploying to production, review:
+- ✅ [PRODUCTION_CHECKLIST.md](./PRODUCTION_CHECKLIST.md) - Complete readiness checklist
+- 📚 [DEPLOYMENT.md](./DEPLOYMENT.md) - Detailed deployment guide
+
+## Development
 
 Run backend and frontend in separate terminals:
 

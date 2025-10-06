@@ -80,7 +80,7 @@ export class WorkflowEngine {
     
     if (approvalRules.length === 0) {
       // No approval rules configured, auto-approve
-      await Expense.updateStatus(expenseId, ExpenseStatus.APPROVED);
+      await this.convertAndApproveExpense(expenseId);
       await ApprovalHistory.logAction(
         expenseId,
         'SYSTEM',
@@ -90,76 +90,88 @@ export class WorkflowEngine {
       return;
     }
 
-    let sequence = 1; // Start from 1 if manager approval exists, or 0 if not
+    // Get the first (or only) approval rule
+    const rule = approvalRules[0];
+    await rule.loadApprovers();
 
-    // Check if manager approval was created first
-    const existingRequests = await ApprovalRequest.findByExpenseId(expenseId);
-    if (existingRequests.length > 0) {
-      sequence = Math.max(...existingRequests.map(r => r.sequence)) + 1;
+    if (!rule.approvers || rule.approvers.length === 0) {
+      // No approvers configured, auto-approve
+      await this.convertAndApproveExpense(expenseId);
+      await ApprovalHistory.logAction(
+        expenseId,
+        'SYSTEM',
+        'AUTO_APPROVED',
+        'No approvers configured in approval rule'
+      );
+      return;
     }
 
-    for (const rule of approvalRules) {
-      await rule.loadApprovers();
-      
-      if (rule.ruleType === ApprovalRuleType.SEQUENTIAL && rule.approvers) {
-        // Create sequential approval requests
-        for (const approver of rule.approvers) {
-          const request = new ApprovalRequest({
-            expense_id: expenseId,
-            approver_id: approver.approverId,
-            sequence: sequence,
-            status: ApprovalRequestStatus.PENDING,
-          });
+    // Filter to get only required approvers
+    const requiredApprovers = rule.approvers.filter(a => a.isRequired);
 
-          await request.save();
+    if (requiredApprovers.length === 0) {
+      // No required approvers, auto-approve
+      await this.convertAndApproveExpense(expenseId);
+      await ApprovalHistory.logAction(
+        expenseId,
+        'SYSTEM',
+        'AUTO_APPROVED',
+        'No required approvers configured'
+      );
+      return;
+    }
 
-          // Log the approval request creation
-          await ApprovalHistory.logAction(
-            expenseId,
-            'SYSTEM',
-            'APPROVAL_REQUEST_CREATED',
-            `Sequential approval request created for rule: ${rule.name}`,
-            { 
-              approverId: approver.approverId, 
-              sequence: sequence, 
-              ruleId: rule.id,
-              ruleType: rule.ruleType 
-            }
-          );
+    // Check if sequential or parallel approval
+    if (rule.isSequentialApproval) {
+      // Sequential: Create request for first approver only
+      const sortedApprovers = requiredApprovers.sort((a, b) => a.sequence - b.sequence);
+      const firstApprover = sortedApprovers[0];
 
-          sequence++;
+      const request = new ApprovalRequest({
+        expense_id: expenseId,
+        approver_id: firstApprover.approverId,
+        sequence: 1, // Start from 1 (0 is reserved for manager approval)
+        status: ApprovalRequestStatus.PENDING,
+      });
+
+      await request.save();
+
+      await ApprovalHistory.logAction(
+        expenseId,
+        'SYSTEM',
+        'APPROVAL_REQUEST_CREATED',
+        `Sequential approval request created (first approver)`,
+        { 
+          approverId: firstApprover.approverId, 
+          sequence: 1, 
+          ruleId: rule.id,
+          isSequential: true
         }
-      } else if (rule.ruleType === ApprovalRuleType.PERCENTAGE || 
-                 rule.ruleType === ApprovalRuleType.SPECIFIC_APPROVER || 
-                 rule.ruleType === ApprovalRuleType.HYBRID) {
-        // For conditional rules, create requests for all approvers at the same sequence level
-        if (rule.approvers) {
-          for (const approver of rule.approvers) {
-            const request = new ApprovalRequest({
-              expense_id: expenseId,
-              approver_id: approver.approverId,
-              sequence: sequence,
-              status: ApprovalRequestStatus.PENDING,
-            });
+      );
+    } else {
+      // Parallel: Create requests for all required approvers simultaneously
+      for (const approver of requiredApprovers) {
+        const request = new ApprovalRequest({
+          expense_id: expenseId,
+          approver_id: approver.approverId,
+          sequence: 1, // All parallel approvals have same sequence
+          status: ApprovalRequestStatus.PENDING,
+        });
 
-            await request.save();
+        await request.save();
 
-            // Log the approval request creation
-            await ApprovalHistory.logAction(
-              expenseId,
-              'SYSTEM',
-              'APPROVAL_REQUEST_CREATED',
-              `Conditional approval request created for rule: ${rule.name}`,
-              { 
-                approverId: approver.approverId, 
-                sequence: sequence, 
-                ruleId: rule.id,
-                ruleType: rule.ruleType 
-              }
-            );
+        await ApprovalHistory.logAction(
+          expenseId,
+          'SYSTEM',
+          'APPROVAL_REQUEST_CREATED',
+          `Parallel approval request created`,
+          { 
+            approverId: approver.approverId, 
+            sequence: 1, 
+            ruleId: rule.id,
+            isSequential: false
           }
-          sequence++;
-        }
+        );
       }
     }
   }
@@ -219,8 +231,70 @@ export class WorkflowEngine {
       return;
     }
 
-    // Handle approval - check if workflow should continue or complete
-    await this.evaluateWorkflowCompletion(expenseId);
+    // Handle approval - check if this was manager approval (sequence 0)
+    const submitter = await User.findById(expense.submitterId);
+    if (!submitter) {
+      throw new Error('Expense submitter not found');
+    }
+
+    if (approvalRequest.sequence === 0 && submitter.isManagerApprover) {
+      // Manager approved, now proceed to required approvers
+      await ApprovalHistory.logAction(
+        expenseId,
+        'SYSTEM',
+        'MANAGER_APPROVED',
+        'Manager approval complete, proceeding to required approvers',
+        { managerId: approverId }
+      );
+
+      await this.createRuleBasedApprovalRequests(expenseId, expense.companyId);
+      return;
+    }
+
+    // Check if all required approvers have approved
+    const allRequiredApproved = await this.checkAllRequiredApproversApproved(expenseId);
+
+    if (allRequiredApproved) {
+      // All required approvers have approved, convert currency and approve
+      await this.convertAndApproveExpense(expenseId);
+      return;
+    }
+
+    // Check if sequential approval is enabled
+    const isSequential = await this.isSequentialApprovalEnabled(expense.companyId);
+
+    if (isSequential) {
+      // Sequential approval: send to next approver
+      const approvalRules = await ApprovalRule.findByCompanyId(expense.companyId);
+      if (approvalRules.length > 0) {
+        const rule = approvalRules[0];
+        await rule.loadApprovers();
+
+        if (rule.approvers) {
+          const requiredApprovers = rule.approvers.filter(a => a.isRequired);
+          const sortedApprovers = requiredApprovers.sort((a, b) => a.sequence - b.sequence);
+
+          // Find the next approver who hasn't approved yet
+          for (const approver of sortedApprovers) {
+            const hasApproved = await ApprovalRequest.hasApproverApproved(expenseId, approver.approverId);
+            if (!hasApproved) {
+              // Check if request already exists
+              const existingRequest = await ApprovalRequest.findByExpenseAndApprover(expenseId, approver.approverId);
+              if (!existingRequest) {
+                // Create request for next approver
+                const nextSequence = approvalRequest.sequence + 1;
+                const user = await User.findById(approver.approverId);
+                if (user) {
+                  await this.sendSequentialApprovalRequest(expenseId, user, nextSequence);
+                }
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+    // For parallel approval, all requests are already created, so just wait for all to approve
   }
 
   /**
@@ -237,52 +311,49 @@ export class WorkflowEngine {
     return await User.findById(nextRequest.approverId);
   }
 
+
+
   /**
-   * Evaluate if the workflow is complete and update expense status accordingly
+   * Convert expense currency and approve the expense
    * @param expenseId - Expense ID
    * @returns Promise<void>
    */
-  private async evaluateWorkflowCompletion(expenseId: string): Promise<void> {
-    const expense = await Expense.findById(expenseId);
-    if (!expense) {
-      throw new Error('Expense not found');
-    }
-
-    // First check if conditional rules are met (this might auto-approve)
-    const conditionalRuleMet = await this.evaluateConditionalRules(expenseId);
-    if (conditionalRuleMet) {
+  private async convertAndApproveExpense(expenseId: string): Promise<void> {
+    try {
+      // Import ExpenseService to avoid circular dependency
+      const { ExpenseService } = await import('./ExpenseService');
+      
+      // Convert currency
+      await ExpenseService.convertExpenseCurrency(expenseId);
+      
+      // Update expense status to approved
       await Expense.updateStatus(expenseId, ExpenseStatus.APPROVED);
+      
+      // Log workflow completion
       await ApprovalHistory.logAction(
         expenseId,
         'SYSTEM',
         'WORKFLOW_COMPLETED',
-        'Expense approved due to conditional rules',
-        { finalStatus: ExpenseStatus.APPROVED, reason: 'conditional_rules' }
+        'Expense approved and currency converted',
+        { finalStatus: ExpenseStatus.APPROVED }
       );
-      return;
-    }
-
-    // Check if there are more pending approvals
-    const nextApprover = await this.getNextApprover(expenseId);
-    if (!nextApprover) {
-      // No more pending approvals, check if all sequential approvals are complete
-      const allRequests = await ApprovalRequest.findByExpenseId(expenseId);
-      const allApproved = allRequests.every(request => 
-        request.status === ApprovalRequestStatus.APPROVED
+    } catch (error) {
+      // Log the error but still approve the expense
+      // Currency conversion failure shouldn't block approval
+      await ApprovalHistory.logAction(
+        expenseId,
+        'SYSTEM',
+        'WORKFLOW_COMPLETED_WITH_WARNING',
+        `Expense approved but currency conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        { 
+          finalStatus: ExpenseStatus.APPROVED,
+          conversionError: error instanceof Error ? error.message : 'Unknown error'
+        }
       );
-
-      if (allApproved) {
-        await Expense.updateStatus(expenseId, ExpenseStatus.APPROVED);
-        await ApprovalHistory.logAction(
-          expenseId,
-          'SYSTEM',
-          'WORKFLOW_COMPLETED',
-          'All approvers have approved the expense',
-          { finalStatus: ExpenseStatus.APPROVED, reason: 'all_approved' }
-        );
-      }
+      
+      // Still approve the expense
+      await Expense.updateStatus(expenseId, ExpenseStatus.APPROVED);
     }
-    // If there are more pending approvals, the workflow continues
   }
 
   /**
@@ -447,5 +518,168 @@ export class WorkflowEngine {
     );
 
     return allApproved;
+  }
+
+  /**
+   * Check if manager approval is required for an employee
+   * @param employeeId - Employee ID
+   * @returns Promise<boolean> - True if manager approval is required
+   */
+  public async checkManagerApproverRequired(employeeId: string): Promise<boolean> {
+    const employee = await User.findById(employeeId);
+    if (!employee) {
+      throw new Error('Employee not found');
+    }
+
+    return employee.isManagerApprover && !!employee.managerId;
+  }
+
+  /**
+   * Get required approvers from approval rule
+   * @param companyId - Company ID
+   * @returns Promise<User[]> - Array of required approvers
+   */
+  public async getRequiredApprovers(companyId: string): Promise<User[]> {
+    const approvalRules = await ApprovalRule.findByCompanyId(companyId);
+    
+    if (approvalRules.length === 0) {
+      return [];
+    }
+
+    const rule = approvalRules[0];
+    await rule.loadApprovers();
+
+    if (!rule.approvers) {
+      return [];
+    }
+
+    const requiredApprovers = rule.approvers.filter(a => a.isRequired);
+    const users: User[] = [];
+
+    for (const approver of requiredApprovers) {
+      const user = await User.findById(approver.approverId);
+      if (user) {
+        users.push(user);
+      }
+    }
+
+    return users;
+  }
+
+  /**
+   * Check if sequential approval is enabled for a company
+   * @param companyId - Company ID
+   * @returns Promise<boolean> - True if sequential approval is enabled
+   */
+  public async isSequentialApprovalEnabled(companyId: string): Promise<boolean> {
+    const approvalRules = await ApprovalRule.findByCompanyId(companyId);
+    
+    if (approvalRules.length === 0) {
+      return false;
+    }
+
+    return approvalRules[0].isSequentialApproval;
+  }
+
+  /**
+   * Send parallel approval requests to all required approvers
+   * @param expenseId - Expense ID
+   * @param approvers - Array of approvers
+   * @returns Promise<void>
+   */
+  public async sendParallelApprovalRequests(expenseId: string, approvers: User[]): Promise<void> {
+    for (const approver of approvers) {
+      const request = new ApprovalRequest({
+        expense_id: expenseId,
+        approver_id: approver.id,
+        sequence: 1,
+        status: ApprovalRequestStatus.PENDING,
+      });
+
+      await request.save();
+
+      await ApprovalHistory.logAction(
+        expenseId,
+        'SYSTEM',
+        'APPROVAL_REQUEST_CREATED',
+        `Parallel approval request sent to ${approver.firstName} ${approver.lastName}`,
+        { 
+          approverId: approver.id, 
+          sequence: 1,
+          isParallel: true
+        }
+      );
+    }
+  }
+
+  /**
+   * Send sequential approval request to a specific approver
+   * @param expenseId - Expense ID
+   * @param approver - Approver user
+   * @param sequence - Sequence number
+   * @returns Promise<void>
+   */
+  public async sendSequentialApprovalRequest(expenseId: string, approver: User, sequence: number): Promise<void> {
+    const request = new ApprovalRequest({
+      expense_id: expenseId,
+      approver_id: approver.id,
+      sequence: sequence,
+      status: ApprovalRequestStatus.PENDING,
+    });
+
+    await request.save();
+
+    await ApprovalHistory.logAction(
+      expenseId,
+      'SYSTEM',
+      'APPROVAL_REQUEST_CREATED',
+      `Sequential approval request sent to ${approver.firstName} ${approver.lastName}`,
+      { 
+        approverId: approver.id, 
+        sequence: sequence,
+        isSequential: true
+      }
+    );
+  }
+
+  /**
+   * Check if all required approvers have approved
+   * @param expenseId - Expense ID
+   * @returns Promise<boolean> - True if all required approvers have approved
+   */
+  public async checkAllRequiredApproversApproved(expenseId: string): Promise<boolean> {
+    const expense = await Expense.findById(expenseId);
+    if (!expense) {
+      throw new Error('Expense not found');
+    }
+
+    const approvalRules = await ApprovalRule.findByCompanyId(expense.companyId);
+    
+    if (approvalRules.length === 0) {
+      return true;
+    }
+
+    const rule = approvalRules[0];
+    await rule.loadApprovers();
+
+    if (!rule.approvers) {
+      return true;
+    }
+
+    const requiredApprovers = rule.approvers.filter(a => a.isRequired);
+
+    if (requiredApprovers.length === 0) {
+      return true;
+    }
+
+    // Check if all required approvers have approved
+    for (const approver of requiredApprovers) {
+      const hasApproved = await ApprovalRequest.hasApproverApproved(expenseId, approver.approverId);
+      if (!hasApproved) {
+        return false;
+      }
+    }
+
+    return true;
   }
 }

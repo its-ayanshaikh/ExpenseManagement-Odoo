@@ -43,7 +43,8 @@ const ExpenseHistoryView: React.FC<ExpenseHistoryViewProps> = ({ onExpenseClick 
     }
 
     fetchExpenses()
-  }, [loadExpenses])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Apply filters when filters or expenses change
   useEffect(() => {
@@ -144,7 +145,7 @@ const ExpenseHistoryView: React.FC<ExpenseHistoryViewProps> = ({ onExpenseClick 
           </div>
           <div className="ml-3">
             <h3 className="text-sm font-medium text-red-800">Error loading expenses</h3>
-            <p className="mt-1 text-sm text-red-700">{loadError}</p>
+            <p className="mt-1 text-sm text-red-700">{loadError.message}</p>
           </div>
         </div>
       </div>

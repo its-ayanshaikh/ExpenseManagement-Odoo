@@ -12,11 +12,19 @@
     "dev:frontend": "npm run dev --workspace=frontend",
     "build:backend": "npm run build --workspace=backend",
     "build:frontend": "npm run build --workspace=frontend",
+    "build:all": "npm run build:backend && npm run build:frontend",
+    "build:prod": "node scripts/build-production.js",
+    "start:backend": "npm run start --workspace=backend",
+    "preview:frontend": "npm run preview --workspace=frontend",
     "lint": "npm run lint --workspaces",
+    "lint:fix": "npm run lint --workspaces -- --fix",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "setup:env": "node scripts/setup-env.js",
     "generate:secret": "node scripts/setup-env.js --generate-secret",
-    "validate:env": "node scripts/validate-env.js"
+    "validate:env": "node scripts/validate-env.js",
+    "test:backend": "npm run test --workspace=backend",
+    "migrate:prod": "npm run migrate:latest --workspace=backend"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^6.0.0",
@@ -26,5 +34,8 @@
     "eslint-plugin-prettier": "^5.0.0",
     "prettier": "^3.0.0",
     "typescript": "^5.1.6"
+  },
+  "optionalDependencies": {
+    "@esbuild/win32-x64": "^0.25.10"
   }
 }

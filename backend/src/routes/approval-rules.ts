@@ -2,11 +2,8 @@ import { Router, Request, Response } from 'express';
 import { authenticateToken } from '../middleware/auth';
 import { 
   requireApprovalRulePermission,
-  enforceCompanyIsolation,
-  roleCheckers
+  enforceCompanyIsolation
 } from '../middleware/authorization';
-import { ApprovalRuleType } from '../types/database';
-import { User } from '../models/User';
 import { ApprovalRuleService } from '../services/ApprovalRuleService';
 
 const router = Router();
@@ -17,26 +14,22 @@ router.use(authenticateToken);
 // Validation interfaces
 interface CreateApprovalRuleRequest {
   name: string;
-  ruleType: ApprovalRuleType;
-  percentageThreshold?: number;
-  specificApproverId?: string;
-  isHybrid?: boolean;
-  priority: number;
-  approvers?: {
+  isSequentialApproval: boolean;
+  priority?: number;
+  approvers: {
     approverId: string;
+    isRequired: boolean;
     sequence: number;
   }[];
 }
 
 interface UpdateApprovalRuleRequest {
   name?: string;
-  ruleType?: ApprovalRuleType;
-  percentageThreshold?: number;
-  specificApproverId?: string;
-  isHybrid?: boolean;
+  isSequentialApproval?: boolean;
   priority?: number;
   approvers?: {
     approverId: string;
+    isRequired: boolean;
     sequence: number;
   }[];
 }
@@ -49,171 +42,51 @@ router.post('/', requireApprovalRulePermission, enforceCompanyIsolation, async (
   try {
     const { 
       name, 
-      ruleType, 
-      percentageThreshold, 
-      specificApproverId, 
-      isHybrid, 
+      isSequentialApproval,
       priority, 
       approvers 
     }: CreateApprovalRuleRequest = req.body;
 
     // Validate required fields
-    if (!name || !ruleType || priority === undefined) {
+    if (!name || isSequentialApproval === undefined || !approvers) {
       res.status(400).json({
         status: 'error',
-        message: 'Name, ruleType, and priority are required',
+        message: 'Name, isSequentialApproval, and approvers are required',
         code: 'MISSING_FIELDS',
-        required: ['name', 'ruleType', 'priority']
+        required: ['name', 'isSequentialApproval', 'approvers']
       });
       return;
     }
 
-    // Validate rule type
-    if (!Object.values(ApprovalRuleType).includes(ruleType)) {
+    // Validate approvers array
+    if (!Array.isArray(approvers) || approvers.length === 0) {
       res.status(400).json({
         status: 'error',
-        message: 'Invalid rule type',
-        code: 'INVALID_RULE_TYPE',
-        validTypes: Object.values(ApprovalRuleType)
+        message: 'At least one approver is required',
+        code: 'MISSING_APPROVERS'
       });
       return;
     }
 
-    // Validate priority
-    if (typeof priority !== 'number' || priority < 1) {
-      res.status(400).json({
-        status: 'error',
-        message: 'Priority must be a positive number',
-        code: 'INVALID_PRIORITY'
-      });
-      return;
-    }
-
-    // Validate rule-specific requirements
-    if (ruleType === ApprovalRuleType.PERCENTAGE || (isHybrid && ruleType === ApprovalRuleType.HYBRID)) {
-      if (!percentageThreshold || percentageThreshold < 1 || percentageThreshold > 100) {
+    // Validate each approver has required fields
+    for (const approver of approvers) {
+      if (!approver.approverId || typeof approver.isRequired !== 'boolean' || typeof approver.sequence !== 'number') {
         res.status(400).json({
           status: 'error',
-          message: 'Percentage threshold must be between 1 and 100 for percentage-based rules',
-          code: 'INVALID_PERCENTAGE_THRESHOLD'
-        });
-        return;
-      }
-    }
-
-    if (ruleType === ApprovalRuleType.SPECIFIC_APPROVER || (isHybrid && ruleType === ApprovalRuleType.HYBRID)) {
-      if (!specificApproverId) {
-        res.status(400).json({
-          status: 'error',
-          message: 'Specific approver ID is required for specific approver rules',
-          code: 'MISSING_SPECIFIC_APPROVER'
-        });
-        return;
-      }
-
-      // Validate that the specific approver exists and belongs to the same company
-      const specificApprover = await User.findById(specificApproverId);
-      if (!specificApprover) {
-        res.status(400).json({
-          status: 'error',
-          message: 'Specific approver not found',
-          code: 'SPECIFIC_APPROVER_NOT_FOUND'
-        });
-        return;
-      }
-
-      if (!roleCheckers.belongsToCompany(specificApprover, req.user!.companyId)) {
-        res.status(400).json({
-          status: 'error',
-          message: 'Specific approver must belong to the same company',
-          code: 'SPECIFIC_APPROVER_COMPANY_MISMATCH'
-        });
-        return;
-      }
-
-      if (!roleCheckers.isAdminOrManager(specificApprover)) {
-        res.status(400).json({
-          status: 'error',
-          message: 'Specific approver must have Admin or Manager role',
-          code: 'INVALID_SPECIFIC_APPROVER_ROLE'
-        });
-        return;
-      }
-    }
-
-    if (ruleType === ApprovalRuleType.SEQUENTIAL) {
-      if (!approvers || approvers.length === 0) {
-        res.status(400).json({
-          status: 'error',
-          message: 'Approvers list is required for sequential rules',
-          code: 'MISSING_APPROVERS'
-        });
-        return;
-      }
-
-      // Validate approvers
-      for (const approver of approvers) {
-        if (!approver.approverId || typeof approver.sequence !== 'number') {
-          res.status(400).json({
-            status: 'error',
-            message: 'Each approver must have approverId and sequence',
-            code: 'INVALID_APPROVER_FORMAT'
-          });
-          return;
-        }
-
-        // Validate that approver exists and belongs to the same company
-        const approverUser = await User.findById(approver.approverId);
-        if (!approverUser) {
-          res.status(400).json({
-            status: 'error',
-            message: `Approver with ID ${approver.approverId} not found`,
-            code: 'APPROVER_NOT_FOUND'
-          });
-          return;
-        }
-
-        if (!roleCheckers.belongsToCompany(approverUser, req.user!.companyId)) {
-          res.status(400).json({
-            status: 'error',
-            message: `Approver ${approver.approverId} must belong to the same company`,
-            code: 'APPROVER_COMPANY_MISMATCH'
-          });
-          return;
-        }
-
-        if (!roleCheckers.isAdminOrManager(approverUser)) {
-          res.status(400).json({
-            status: 'error',
-            message: `Approver ${approver.approverId} must have Admin or Manager role`,
-            code: 'INVALID_APPROVER_ROLE'
-          });
-          return;
-        }
-      }
-
-      // Check for duplicate sequences
-      const sequences = approvers.map(a => a.sequence);
-      const uniqueSequences = new Set(sequences);
-      if (sequences.length !== uniqueSequences.size) {
-        res.status(400).json({
-          status: 'error',
-          message: 'Approver sequences must be unique',
-          code: 'DUPLICATE_SEQUENCES'
+          message: 'Each approver must have approverId, isRequired, and sequence',
+          code: 'INVALID_APPROVER_FORMAT'
         });
         return;
       }
     }
 
     // Create approval rule using ApprovalRuleService
-    const approvalRule = await ApprovalRuleService.createApprovalRule({
+    const approvalRuleService = new ApprovalRuleService();
+    const approvalRule = await approvalRuleService.createApprovalRule({
       companyId: req.user!.companyId,
       name,
-      ruleType,
-      percentageThreshold,
-      specificApproverId,
-      isHybrid: isHybrid || false,
-      priority,
+      isSequentialApproval,
+      priority: priority || 0,
       approvers
     });
 
@@ -221,23 +94,7 @@ router.post('/', requireApprovalRulePermission, enforceCompanyIsolation, async (
       status: 'success',
       message: 'Approval rule created successfully',
       data: {
-        approvalRule: {
-          id: approvalRule.id,
-          companyId: approvalRule.companyId,
-          name: approvalRule.name,
-          ruleType: approvalRule.ruleType,
-          percentageThreshold: approvalRule.percentageThreshold,
-          specificApproverId: approvalRule.specificApproverId,
-          isHybrid: approvalRule.isHybrid,
-          priority: approvalRule.priority,
-          approvers: approvalRule.approvers?.map(a => ({
-            id: a.id,
-            approverId: a.approverId,
-            sequence: a.sequence
-          })) || [],
-          createdAt: approvalRule.createdAt,
-          updatedAt: approvalRule.updatedAt
-        }
+        approvalRule
       }
     });
 
@@ -247,9 +104,11 @@ router.post('/', requireApprovalRulePermission, enforceCompanyIsolation, async (
     // Handle specific service errors
     if (error instanceof Error) {
       if (error.message.includes('required') || 
-          error.message.includes('threshold') || 
           error.message.includes('approver') ||
-          error.message.includes('sequence')) {
+          error.message.includes('sequence') ||
+          error.message.includes('duplicate') ||
+          error.message.includes('Manager') ||
+          error.message.includes('Admin')) {
         res.status(400).json({
           status: 'error',
           message: error.message,
@@ -274,32 +133,15 @@ router.post('/', requireApprovalRulePermission, enforceCompanyIsolation, async (
 router.get('/', requireApprovalRulePermission, enforceCompanyIsolation, async (req: Request, res: Response): Promise<void> => {
   try {
     // Get approval rules for the company
-    const approvalRules = await ApprovalRuleService.getApprovalRulesByCompany(req.user!.companyId);
-
-    const formattedRules = approvalRules.map(rule => ({
-      id: rule.id,
-      companyId: rule.companyId,
-      name: rule.name,
-      ruleType: rule.ruleType,
-      percentageThreshold: rule.percentageThreshold,
-      specificApproverId: rule.specificApproverId,
-      isHybrid: rule.isHybrid,
-      priority: rule.priority,
-      approvers: rule.approvers?.map(a => ({
-        id: a.id,
-        approverId: a.approverId,
-        sequence: a.sequence
-      })) || [],
-      createdAt: rule.createdAt,
-      updatedAt: rule.updatedAt
-    }));
+    const approvalRuleService = new ApprovalRuleService();
+    const approvalRules = await approvalRuleService.getApprovalRulesByCompany(req.user!.companyId);
 
     res.status(200).json({
       status: 'success',
       message: 'Approval rules retrieved successfully',
       data: {
-        approvalRules: formattedRules,
-        count: formattedRules.length
+        approvalRules,
+        count: approvalRules.length
       }
     });
 
@@ -331,9 +173,11 @@ router.get('/:id', requireApprovalRulePermission, enforceCompanyIsolation, async
     }
 
     // Get approval rule by ID
-    const approvalRule = await ApprovalRuleService.getApprovalRuleById(id, req.user!.companyId);
+    const approvalRuleService = new ApprovalRuleService();
+    const approvalRule = await approvalRuleService.getApprovalRuleById(id);
 
-    if (!approvalRule) {
+    // Verify the rule belongs to the user's company
+    if (approvalRule.companyId !== req.user!.companyId) {
       res.status(404).json({
         status: 'error',
         message: 'Approval rule not found',
@@ -346,23 +190,7 @@ router.get('/:id', requireApprovalRulePermission, enforceCompanyIsolation, async
       status: 'success',
       message: 'Approval rule retrieved successfully',
       data: {
-        approvalRule: {
-          id: approvalRule.id,
-          companyId: approvalRule.companyId,
-          name: approvalRule.name,
-          ruleType: approvalRule.ruleType,
-          percentageThreshold: approvalRule.percentageThreshold,
-          specificApproverId: approvalRule.specificApproverId,
-          isHybrid: approvalRule.isHybrid,
-          priority: approvalRule.priority,
-          approvers: approvalRule.approvers?.map(a => ({
-            id: a.id,
-            approverId: a.approverId,
-            sequence: a.sequence
-          })) || [],
-          createdAt: approvalRule.createdAt,
-          updatedAt: approvalRule.updatedAt
-        }
+        approvalRule
       }
     });
 
@@ -395,10 +223,7 @@ router.put('/:id', requireApprovalRulePermission, enforceCompanyIsolation, async
     const { id } = req.params;
     const { 
       name, 
-      ruleType, 
-      percentageThreshold, 
-      specificApproverId, 
-      isHybrid, 
+      isSequentialApproval,
       priority, 
       approvers 
     }: UpdateApprovalRuleRequest = req.body;
@@ -412,168 +237,54 @@ router.put('/:id', requireApprovalRulePermission, enforceCompanyIsolation, async
       return;
     }
 
-    // Validate rule type if provided
-    if (ruleType && !Object.values(ApprovalRuleType).includes(ruleType)) {
-      res.status(400).json({
-        status: 'error',
-        message: 'Invalid rule type',
-        code: 'INVALID_RULE_TYPE',
-        validTypes: Object.values(ApprovalRuleType)
-      });
-      return;
-    }
-
-    // Validate priority if provided
-    if (priority !== undefined && (typeof priority !== 'number' || priority < 1)) {
-      res.status(400).json({
-        status: 'error',
-        message: 'Priority must be a positive number',
-        code: 'INVALID_PRIORITY'
-      });
-      return;
-    }
-
-    // Validate rule-specific requirements if rule type is being updated
-    if (ruleType === ApprovalRuleType.PERCENTAGE || (isHybrid && ruleType === ApprovalRuleType.HYBRID)) {
-      if (percentageThreshold !== undefined && (percentageThreshold < 1 || percentageThreshold > 100)) {
+    // Validate approvers if provided
+    if (approvers) {
+      if (!Array.isArray(approvers) || approvers.length === 0) {
         res.status(400).json({
           status: 'error',
-          message: 'Percentage threshold must be between 1 and 100 for percentage-based rules',
-          code: 'INVALID_PERCENTAGE_THRESHOLD'
-        });
-        return;
-      }
-    }
-
-    if (ruleType === ApprovalRuleType.SPECIFIC_APPROVER || (isHybrid && ruleType === ApprovalRuleType.HYBRID)) {
-      if (specificApproverId) {
-        // Validate that the specific approver exists and belongs to the same company
-        const specificApprover = await User.findById(specificApproverId);
-        if (!specificApprover) {
-          res.status(400).json({
-            status: 'error',
-            message: 'Specific approver not found',
-            code: 'SPECIFIC_APPROVER_NOT_FOUND'
-          });
-          return;
-        }
-
-        if (!roleCheckers.belongsToCompany(specificApprover, req.user!.companyId)) {
-          res.status(400).json({
-            status: 'error',
-            message: 'Specific approver must belong to the same company',
-            code: 'SPECIFIC_APPROVER_COMPANY_MISMATCH'
-          });
-          return;
-        }
-
-        if (!roleCheckers.isAdminOrManager(specificApprover)) {
-          res.status(400).json({
-            status: 'error',
-            message: 'Specific approver must have Admin or Manager role',
-            code: 'INVALID_SPECIFIC_APPROVER_ROLE'
-          });
-          return;
-        }
-      }
-    }
-
-    if (ruleType === ApprovalRuleType.SEQUENTIAL && approvers) {
-      if (approvers.length === 0) {
-        res.status(400).json({
-          status: 'error',
-          message: 'Approvers list cannot be empty for sequential rules',
-          code: 'EMPTY_APPROVERS'
+          message: 'At least one approver is required',
+          code: 'MISSING_APPROVERS'
         });
         return;
       }
 
-      // Validate approvers
+      // Validate each approver has required fields
       for (const approver of approvers) {
-        if (!approver.approverId || typeof approver.sequence !== 'number') {
+        if (!approver.approverId || typeof approver.isRequired !== 'boolean' || typeof approver.sequence !== 'number') {
           res.status(400).json({
             status: 'error',
-            message: 'Each approver must have approverId and sequence',
+            message: 'Each approver must have approverId, isRequired, and sequence',
             code: 'INVALID_APPROVER_FORMAT'
           });
           return;
         }
-
-        // Validate that approver exists and belongs to the same company
-        const approverUser = await User.findById(approver.approverId);
-        if (!approverUser) {
-          res.status(400).json({
-            status: 'error',
-            message: `Approver with ID ${approver.approverId} not found`,
-            code: 'APPROVER_NOT_FOUND'
-          });
-          return;
-        }
-
-        if (!roleCheckers.belongsToCompany(approverUser, req.user!.companyId)) {
-          res.status(400).json({
-            status: 'error',
-            message: `Approver ${approver.approverId} must belong to the same company`,
-            code: 'APPROVER_COMPANY_MISMATCH'
-          });
-          return;
-        }
-
-        if (!roleCheckers.isAdminOrManager(approverUser)) {
-          res.status(400).json({
-            status: 'error',
-            message: `Approver ${approver.approverId} must have Admin or Manager role`,
-            code: 'INVALID_APPROVER_ROLE'
-          });
-          return;
-        }
-      }
-
-      // Check for duplicate sequences
-      const sequences = approvers.map(a => a.sequence);
-      const uniqueSequences = new Set(sequences);
-      if (sequences.length !== uniqueSequences.size) {
-        res.status(400).json({
-          status: 'error',
-          message: 'Approver sequences must be unique',
-          code: 'DUPLICATE_SEQUENCES'
-        });
-        return;
       }
     }
 
     // Update approval rule using ApprovalRuleService
-    const updatedRule = await ApprovalRuleService.updateApprovalRule(id, req.user!.companyId, {
+    const approvalRuleService = new ApprovalRuleService();
+    const updatedRule = await approvalRuleService.updateApprovalRule(id, {
       name,
-      ruleType,
-      percentageThreshold,
-      specificApproverId,
-      isHybrid,
+      isSequentialApproval,
       priority,
       approvers
     });
+
+    // Verify the rule belongs to the user's company
+    if (updatedRule.companyId !== req.user!.companyId) {
+      res.status(404).json({
+        status: 'error',
+        message: 'Approval rule not found',
+        code: 'APPROVAL_RULE_NOT_FOUND'
+      });
+      return;
+    }
 
     res.status(200).json({
       status: 'success',
       message: 'Approval rule updated successfully',
       data: {
-        approvalRule: {
-          id: updatedRule.id,
-          companyId: updatedRule.companyId,
-          name: updatedRule.name,
-          ruleType: updatedRule.ruleType,
-          percentageThreshold: updatedRule.percentageThreshold,
-          specificApproverId: updatedRule.specificApproverId,
-          isHybrid: updatedRule.isHybrid,
-          priority: updatedRule.priority,
-          approvers: updatedRule.approvers?.map(a => ({
-            id: a.id,
-            approverId: a.approverId,
-            sequence: a.sequence
-          })) || [],
-          createdAt: updatedRule.createdAt,
-          updatedAt: updatedRule.updatedAt
-        }
+        approvalRule: updatedRule
       }
     });
 
@@ -592,9 +303,11 @@ router.put('/:id', requireApprovalRulePermission, enforceCompanyIsolation, async
       }
       
       if (error.message.includes('required') || 
-          error.message.includes('threshold') || 
           error.message.includes('approver') ||
-          error.message.includes('sequence')) {
+          error.message.includes('sequence') ||
+          error.message.includes('duplicate') ||
+          error.message.includes('Manager') ||
+          error.message.includes('Admin')) {
         res.status(400).json({
           status: 'error',
           message: error.message,
@@ -629,10 +342,12 @@ router.delete('/:id', requireApprovalRulePermission, enforceCompanyIsolation, as
       return;
     }
 
-    // Delete approval rule using ApprovalRuleService
-    const deleted = await ApprovalRuleService.deleteApprovalRule(id, req.user!.companyId);
+    // Get the rule first to verify company ownership
+    const approvalRuleService = new ApprovalRuleService();
+    const rule = await approvalRuleService.getApprovalRuleById(id);
 
-    if (!deleted) {
+    // Verify the rule belongs to the user's company
+    if (rule.companyId !== req.user!.companyId) {
       res.status(404).json({
         status: 'error',
         message: 'Approval rule not found',
@@ -640,6 +355,9 @@ router.delete('/:id', requireApprovalRulePermission, enforceCompanyIsolation, as
       });
       return;
     }
+
+    // Delete approval rule
+    await approvalRuleService.deleteApprovalRule(id);
 
     res.status(200).json({
       status: 'success',

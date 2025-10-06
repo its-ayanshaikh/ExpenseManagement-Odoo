@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider } from './contexts/AuthContext'
@@ -5,11 +6,25 @@ import { NotificationProvider } from './contexts/NotificationContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { NotificationContainer } from './components/NotificationContainer'
 import { AccessibilityEnhancer, SkipLink } from './components/shared/AccessibilityEnhancer'
-import { AccessibilityTester } from './components/dev/AccessibilityTester'
-import { LoginPage, SignupPage, DashboardPage, UserManagementPage, ApprovalRuleConfigPage, AdminExpensesPage } from './pages'
 import ProtectedRoute from './components/ProtectedRoute'
 import { UserRole } from './types'
 import { parseApiError } from './utils/errorHandling'
+import { LoadingSpinner } from './components/shared/LoadingSpinner'
+
+// Lazy load pages for code splitting
+const LoginPage = lazy(() => import('./pages/LoginPage'))
+const SignupPage = lazy(() => import('./pages/SignupPage'))
+const DashboardPage = lazy(() => import('./pages/DashboardPage'))
+const ExpensesPage = lazy(() => import('./pages/ExpensesPage'))
+const UserManagementPage = lazy(() => import('./pages/UserManagementPage'))
+const ApprovalRuleConfigPage = lazy(() => import('./pages/ApprovalRuleConfigPage'))
+const AdminExpensesPage = lazy(() => import('./pages/AdminExpensesPage'))
+const ApprovalsPage = lazy(() => import('./pages/ApprovalsPage').then(module => ({ default: module.ApprovalsPage })))
+
+// Only load AccessibilityTester in development
+const AccessibilityTester = import.meta.env.DEV 
+  ? lazy(() => import('./components/dev/AccessibilityTester').then(module => ({ default: module.AccessibilityTester })))
+  : null
 
 // Create a client for React Query with enhanced error handling
 const queryClient = new QueryClient({
@@ -50,6 +65,11 @@ function App() {
                   <SkipLink href="#navigation">
                     Skip to navigation
                   </SkipLink>
+                  <Suspense fallback={
+                    <div className="flex items-center justify-center min-h-screen">
+                      <LoadingSpinner size="xl" />
+                    </div>
+                  }>
                 <Routes>
             {/* Public routes */}
             <Route path="/login" element={<LoginPage />} />
@@ -85,9 +105,9 @@ function App() {
             } />
             
             {/* Manager or Admin routes (Requirements 7.1, 7.2) */}
-            <Route path="/approvals/*" element={
+            <Route path="/approvals" element={
               <ProtectedRoute managerOrAdmin>
-                <div>Approval Management - Pending Approvals, Team Expenses</div>
+                <ApprovalsPage />
               </ProtectedRoute>
             } />
             
@@ -111,7 +131,7 @@ function App() {
                 requiredRole={[UserRole.EMPLOYEE, UserRole.MANAGER, UserRole.ADMIN]} 
                 requireAnyRole
               >
-                <div>Expense Management - All roles can access</div>
+                <ExpensesPage />
               </ProtectedRoute>
             } />
             
@@ -130,12 +150,17 @@ function App() {
                   {/* Catch all - redirect to dashboard */}
                   <Route path="*" element={<Navigate to="/dashboard" replace />} />
                 </Routes>
+                  </Suspense>
                 
                 {/* Global notification container */}
                 <NotificationContainer />
                 
-                {/* Development accessibility tester */}
-                <AccessibilityTester />
+                {/* Development accessibility tester - only in dev mode */}
+                {AccessibilityTester && (
+                  <Suspense fallback={null}>
+                    <AccessibilityTester />
+                  </Suspense>
+                )}
                 </div>
               </Router>
             </AccessibilityEnhancer>

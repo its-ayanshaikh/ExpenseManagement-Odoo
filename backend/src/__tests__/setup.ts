@@ -1,5 +1,5 @@
-import { knex } from '../config/database';
-import { redis } from '../utils/redis';
+import { db } from '../config/database';
+import redisClient from '../utils/redis';
 
 // Global test setup
 beforeAll(async () => {
@@ -10,13 +10,20 @@ beforeAll(async () => {
   }
   
   // Run migrations
-  await knex.migrate.latest();
+  await db.migrate.latest();
+  
+  // Connect to Redis
+  try {
+    await redisClient.connect();
+  } catch (error) {
+    console.warn('Redis connection failed in tests, continuing without cache:', error);
+  }
 });
 
 // Clean up after each test
 afterEach(async () => {
   // Clear all tables except migrations
-  const tables = await knex.raw(`
+  const tables = await db.raw(`
     SELECT tablename FROM pg_tables 
     WHERE schemaname = 'public' 
     AND tablename != 'knex_migrations' 
@@ -24,19 +31,22 @@ afterEach(async () => {
   `);
   
   for (const table of tables.rows) {
-    await knex.raw(`TRUNCATE TABLE "${table.tablename}" CASCADE`);
+    await db.raw(`TRUNCATE TABLE "${table.tablename}" CASCADE`);
   }
   
-  // Clear Redis cache
-  if (redis.isOpen) {
-    await redis.flushall();
+  // Clear Redis cache if connected
+  if (redisClient.isClientConnected()) {
+    const client = redisClient.getClient();
+    if (client) {
+      await client.flushAll();
+    }
   }
 });
 
 // Global test teardown
 afterAll(async () => {
-  await knex.destroy();
-  if (redis.isOpen) {
-    await redis.quit();
+  await db.destroy();
+  if (redisClient.isClientConnected()) {
+    await redisClient.disconnect();
   }
 });

@@ -40,7 +40,8 @@ const UserManagementPage: React.FC = () => {
 
   useEffect(() => {
     fetchUsers()
-  }, [fetchUsers])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (fetchedUsers) {
@@ -214,9 +215,8 @@ const UserManagementPage: React.FC = () => {
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          user.isManagerApprover ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                        }`}>
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${user.isManagerApprover ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                          }`}>
                           {user.isManagerApprover ? 'Yes' : 'No'}
                         </span>
                       </td>
@@ -332,9 +332,8 @@ const UserManagementPage: React.FC = () => {
                     </div>
                     <div>
                       <span className="font-medium text-gray-700">Manager Approver:</span>
-                      <span className={`ml-2 inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        viewingUser.isManagerApprover ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                      }`}>
+                      <span className={`ml-2 inline-flex px-2 py-1 text-xs font-semibold rounded-full ${viewingUser.isManagerApprover ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                        }`}>
                         {viewingUser.isManagerApprover ? 'Yes' : 'No'}
                       </span>
                     </div>

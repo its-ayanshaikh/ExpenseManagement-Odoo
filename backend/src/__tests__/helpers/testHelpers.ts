@@ -1,4 +1,4 @@
-import { knex } from '../../config/database';
+import { db as knex } from '../../config/database';
 import { UserService } from '../../services/UserService';
 import { ExpenseService } from '../../services/ExpenseService';
 import { ApprovalRuleService } from '../../services/ApprovalRuleService';
@@ -59,7 +59,10 @@ export class TestDataFactory {
     };
 
     await knex('companies').insert({
-      ...company,
+      id: company.id,
+      name: company.name,
+      country: company.country,
+      default_currency: company.defaultCurrency,
       created_at: new Date(),
       updated_at: new Date(),
     });

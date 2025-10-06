@@ -23,7 +23,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onToggle, user }) =>
 
     const handleClickOutside = (event: MouseEvent) => {
       if (
-        menuRef.current && 
+        menuRef.current &&
         !menuRef.current.contains(event.target as Node) &&
         buttonRef.current &&
         !buttonRef.current.contains(event.target as Node)
@@ -88,22 +88,22 @@ export const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onToggle, user }) =>
         {/* Avatar */}
         <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
           <span className="text-sm font-medium text-white">
-            {user.firstName[0]}{user.lastName[0]}
+            {user.firstName && user.firstName[0]}{user.lastName && user.lastName[0]}
           </span>
         </div>
-        
+
         {/* User name - hidden on mobile */}
         {!isMobile && (
           <span className="hidden sm:block text-sm font-medium text-gray-700">
             {user.firstName}
           </span>
         )}
-        
+
         {/* Dropdown arrow */}
-        <svg 
+        <svg
           className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
-          fill="none" 
-          stroke="currentColor" 
+          fill="none"
+          stroke="currentColor"
           viewBox="0 0 24 24"
           aria-hidden="true"
         >

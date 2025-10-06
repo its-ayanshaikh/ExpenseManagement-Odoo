@@ -45,6 +45,140 @@ interface RejectionRequest {
 }
 
 /**
+ * POST /api/expenses/draft
+ * Save expense as draft without submitting (Employee role required)
+ */
+router.post('/draft', requireEmployee, enforceCompanyIsolation, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { amount, currency, category, description, expenseDate, receiptUrl }: CreateExpenseRequest = req.body;
+
+    // Validate required fields
+    if (!amount || !currency || !category || !description || !expenseDate) {
+      res.status(400).json({
+        status: 'error',
+        message: 'Amount, currency, category, description, and expenseDate are required',
+        code: 'MISSING_FIELDS',
+        required: ['amount', 'currency', 'category', 'description', 'expenseDate']
+      });
+      return;
+    }
+
+    // Validate amount
+    if (typeof amount !== 'number' || amount <= 0) {
+      res.status(400).json({
+        status: 'error',
+        message: 'Amount must be a positive number',
+        code: 'INVALID_AMOUNT'
+      });
+      return;
+    }
+
+    // Validate currency format (3-letter ISO code)
+    if (!/^[A-Z]{3}$/.test(currency)) {
+      res.status(400).json({
+        status: 'error',
+        message: 'Currency must be a 3-letter ISO code (e.g., USD, EUR)',
+        code: 'INVALID_CURRENCY'
+      });
+      return;
+    }
+
+    // Validate expense date
+    const parsedDate = new Date(expenseDate);
+    if (isNaN(parsedDate.getTime())) {
+      res.status(400).json({
+        status: 'error',
+        message: 'Invalid expense date format',
+        code: 'INVALID_DATE'
+      });
+      return;
+    }
+
+    // Check if expense date is not in the future
+    if (parsedDate > new Date()) {
+      res.status(400).json({
+        status: 'error',
+        message: 'Expense date cannot be in the future',
+        code: 'FUTURE_DATE'
+      });
+      return;
+    }
+
+    // Create expense draft using ExpenseService
+    const expenseData: CreateExpenseDTO = {
+      submitterId: req.user!.id,
+      companyId: req.user!.companyId,
+      amount,
+      currency: currency.toUpperCase(),
+      category,
+      description,
+      expenseDate: parsedDate,
+      receiptUrl
+    };
+
+    const expense = await ExpenseService.saveDraftExpense(expenseData);
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Expense draft saved successfully',
+      data: {
+        expense: {
+          id: expense.id,
+          submitterId: expense.submitterId,
+          companyId: expense.companyId,
+          amount: expense.amount,
+          currency: expense.currency,
+          category: expense.category,
+          description: expense.description,
+          expenseDate: expense.expenseDate,
+          receiptUrl: expense.receiptUrl,
+          status: expense.status,
+          convertedAmount: expense.convertedAmount,
+          convertedCurrency: expense.convertedCurrency,
+          createdAt: expense.createdAt,
+          updatedAt: expense.updatedAt
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Save draft expense error:', error);
+    
+    if (error instanceof Error) {
+      // Handle specific ExpenseService errors
+      if (error.message.includes('not found')) {
+        res.status(404).json({
+          status: 'error',
+          message: error.message,
+          code: 'RESOURCE_NOT_FOUND'
+        });
+        return;
+      } else if (error.message.includes('does not belong')) {
+        res.status(403).json({
+          status: 'error',
+          message: error.message,
+          code: 'COMPANY_MISMATCH'
+        });
+        return;
+      } else if (error.message.includes('Invalid')) {
+        res.status(400).json({
+          status: 'error',
+          message: error.message,
+          code: 'VALIDATION_ERROR'
+        });
+        return;
+      }
+    }
+    
+    res.status(500).json({
+      status: 'error',
+      message: 'Internal server error during expense draft creation',
+      code: 'EXPENSE_DRAFT_CREATION_ERROR'
+    });
+  }
+});
+
+/**
  * POST /api/expenses
  * Submit new expense (Employee role required)
  */
@@ -292,6 +426,232 @@ router.get('/', enforceCompanyIsolation, async (req: Request, res: Response): Pr
       status: 'error',
       message: 'Internal server error while retrieving expenses',
       code: 'GET_EXPENSES_ERROR'
+    });
+  }
+});
+
+/**
+ * POST /api/expenses/:id/submit
+ * Submit a draft expense for approval (Employee role required)
+ */
+router.post('/:id/submit', requireEmployee, enforceCompanyIsolation, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    // Get the expense to verify ownership
+    const expense = await ExpenseService.getExpenseById(id);
+    
+    if (!expense) {
+      res.status(404).json({
+        status: 'error',
+        message: 'Expense not found',
+        code: 'EXPENSE_NOT_FOUND'
+      });
+      return;
+    }
+
+    // Check if user owns the expense
+    if (expense.submitterId !== req.user!.id) {
+      res.status(403).json({
+        status: 'error',
+        message: 'Access denied. You can only submit your own expenses',
+        code: 'EXPENSE_SUBMIT_ACCESS_DENIED'
+      });
+      return;
+    }
+
+    // Submit the expense using ExpenseService
+    const submittedExpense = await ExpenseService.submitExpense(id);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Expense submitted for approval successfully',
+      data: {
+        expense: {
+          id: submittedExpense.id,
+          submitterId: submittedExpense.submitterId,
+          companyId: submittedExpense.companyId,
+          amount: submittedExpense.amount,
+          currency: submittedExpense.currency,
+          category: submittedExpense.category,
+          description: submittedExpense.description,
+          expenseDate: submittedExpense.expenseDate,
+          receiptUrl: submittedExpense.receiptUrl,
+          status: submittedExpense.status,
+          convertedAmount: submittedExpense.convertedAmount,
+          convertedCurrency: submittedExpense.convertedCurrency,
+          createdAt: submittedExpense.createdAt,
+          updatedAt: submittedExpense.updatedAt
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Submit expense error:', error);
+    
+    if (error instanceof Error) {
+      if (error.message.includes('not found')) {
+        res.status(404).json({
+          status: 'error',
+          message: error.message,
+          code: 'EXPENSE_NOT_FOUND'
+        });
+        return;
+      } else if (error.message.includes('Only draft expenses')) {
+        res.status(400).json({
+          status: 'error',
+          message: error.message,
+          code: 'EXPENSE_NOT_DRAFT'
+        });
+        return;
+      } else if (error.message.includes('Access denied')) {
+        res.status(403).json({
+          status: 'error',
+          message: error.message,
+          code: 'EXPENSE_SUBMIT_ACCESS_DENIED'
+        });
+        return;
+      }
+    }
+    
+    res.status(500).json({
+      status: 'error',
+      message: 'Internal server error during expense submission',
+      code: 'EXPENSE_SUBMIT_ERROR'
+    });
+  }
+});
+
+/**
+ * GET /api/expenses/category/:category
+ * Get expenses by category for current user (Employee role required)
+ * Categories: AMOUNT_TO_SUBMIT (drafts), WAITING_APPROVAL (pending), APPROVED
+ */
+router.get('/category/:category', requireEmployee, enforceCompanyIsolation, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { category } = req.params;
+
+    // Validate category
+    const validCategories = ['AMOUNT_TO_SUBMIT', 'WAITING_APPROVAL', 'APPROVED'];
+    if (!validCategories.includes(category)) {
+      res.status(400).json({
+        status: 'error',
+        message: `Invalid category. Must be one of: ${validCategories.join(', ')}`,
+        code: 'INVALID_CATEGORY',
+        validCategories
+      });
+      return;
+    }
+
+    // Get expenses by category using ExpenseService
+    const expenses = await ExpenseService.getExpensesByCategory(req.user!.id, category as any);
+
+    res.status(200).json({
+      status: 'success',
+      message: `Expenses in category '${category}' retrieved successfully`,
+      data: {
+        category,
+        expenses: expenses.map(expense => ({
+          id: expense.id,
+          submitterId: expense.submitterId,
+          companyId: expense.companyId,
+          amount: expense.amount,
+          currency: expense.currency,
+          category: expense.category,
+          description: expense.description,
+          expenseDate: expense.expenseDate,
+          receiptUrl: expense.receiptUrl,
+          status: expense.status,
+          convertedAmount: expense.convertedAmount,
+          convertedCurrency: expense.convertedCurrency,
+          createdAt: expense.createdAt,
+          updatedAt: expense.updatedAt
+        })),
+        count: expenses.length
+      }
+    });
+
+  } catch (error) {
+    console.error('Get expenses by category error:', error);
+    
+    if (error instanceof Error) {
+      if (error.message.includes('Invalid category')) {
+        res.status(400).json({
+          status: 'error',
+          message: error.message,
+          code: 'INVALID_CATEGORY'
+        });
+        return;
+      }
+    }
+    
+    res.status(500).json({
+      status: 'error',
+      message: 'Internal server error while retrieving expenses by category',
+      code: 'GET_EXPENSES_BY_CATEGORY_ERROR'
+    });
+  }
+});
+
+/**
+ * GET /api/expenses/pending-approvals
+ * Get expenses pending approval for current user (Manager/Admin only)
+ * NOTE: This route MUST be defined before /:id route to avoid route conflicts
+ */
+router.get('/pending-approvals', requireAdminOrManager, enforceCompanyIsolation, async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Get pending approvals using ExpenseService
+    const expenses = await ExpenseService.getPendingApprovalsForUser(req.user!.id);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Pending approvals retrieved successfully',
+      data: {
+        expenses: expenses.map(expense => ({
+          id: expense.id,
+          submitterId: expense.submitterId,
+          companyId: expense.companyId,
+          amount: expense.amount,
+          currency: expense.currency,
+          category: expense.category,
+          description: expense.description,
+          expenseDate: expense.expenseDate,
+          receiptUrl: expense.receiptUrl,
+          status: expense.status,
+          convertedAmount: expense.convertedAmount,
+          convertedCurrency: expense.convertedCurrency,
+          createdAt: expense.createdAt,
+          updatedAt: expense.updatedAt
+        })),
+        count: expenses.length
+      }
+    });
+
+  } catch (error) {
+    console.error('Get pending approvals error:', error);
+    
+    if (error instanceof Error) {
+      if (error.message.includes('not found')) {
+        res.status(404).json({
+          status: 'error',
+          message: error.message,
+          code: 'USER_NOT_FOUND'
+        });
+        return;
+      } else if (error.message.includes('not authorized')) {
+        res.status(403).json({
+          status: 'error',
+          message: error.message,
+          code: 'UNAUTHORIZED_ROLE'
+        });
+        return;
+      }
+    }
+    
+    res.status(500).json({
+      status: 'error',
+      message: 'Internal server error while retrieving pending approvals',
+      code: 'PENDING_APPROVALS_ERROR'
     });
   }
 });
@@ -825,68 +1185,6 @@ router.get('/:id/history', enforceCompanyIsolation, async (req: Request, res: Re
       status: 'error',
       message: 'Internal server error while retrieving approval history',
       code: 'APPROVAL_HISTORY_ERROR'
-    });
-  }
-});
-
-/**
- * GET /api/expenses/pending-approvals
- * Get expenses pending approval for current user (Manager/Admin only)
- */
-router.get('/pending-approvals', requireAdminOrManager, enforceCompanyIsolation, async (req: Request, res: Response): Promise<void> => {
-  try {
-    // Get pending approvals using ExpenseService
-    const expenses = await ExpenseService.getPendingApprovalsForUser(req.user!.id);
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Pending approvals retrieved successfully',
-      data: {
-        expenses: expenses.map(expense => ({
-          id: expense.id,
-          submitterId: expense.submitterId,
-          companyId: expense.companyId,
-          amount: expense.amount,
-          currency: expense.currency,
-          category: expense.category,
-          description: expense.description,
-          expenseDate: expense.expenseDate,
-          receiptUrl: expense.receiptUrl,
-          status: expense.status,
-          convertedAmount: expense.convertedAmount,
-          convertedCurrency: expense.convertedCurrency,
-          createdAt: expense.createdAt,
-          updatedAt: expense.updatedAt
-        })),
-        count: expenses.length
-      }
-    });
-
-  } catch (error) {
-    console.error('Get pending approvals error:', error);
-    
-    if (error instanceof Error) {
-      if (error.message.includes('not found')) {
-        res.status(404).json({
-          status: 'error',
-          message: error.message,
-          code: 'USER_NOT_FOUND'
-        });
-        return;
-      } else if (error.message.includes('not authorized')) {
-        res.status(403).json({
-          status: 'error',
-          message: error.message,
-          code: 'UNAUTHORIZED_ROLE'
-        });
-        return;
-      }
-    }
-    
-    res.status(500).json({
-      status: 'error',
-      message: 'Internal server error while retrieving pending approvals',
-      code: 'PENDING_APPROVALS_ERROR'
     });
   }
 });

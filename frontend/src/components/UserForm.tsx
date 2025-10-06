@@ -16,6 +16,7 @@ interface FormData {
   firstName: string
   lastName: string
   email: string
+  password: string
   role: UserRole
   managerId: string
   isManagerApprover: boolean
@@ -25,8 +26,52 @@ interface FormErrors {
   firstName?: string
   lastName?: string
   email?: string
+  password?: string
   role?: string
   managerId?: string
+}
+
+interface RoleOption {
+  value: UserRole
+  label: string
+  disabled: boolean
+  hidden: boolean
+}
+
+/**
+ * Determines which roles should be available in the role dropdown
+ * 
+ * Design Decision: Admin role is NEVER displayed during user creation (per business rule
+ * that only one admin exists per company and is created during company setup). When editing
+ * an existing admin user, the admin role remains visible but disabled to show current state.
+ */
+const getAvailableRoles = (
+  users: User[], 
+  editingUser: User | null
+): RoleOption[] => {
+  const hasAdmin = users.some(u => u.role === UserRole.ADMIN)
+  const isEditingAdmin = editingUser?.role === UserRole.ADMIN
+  
+  return [
+    {
+      value: UserRole.ADMIN,
+      label: 'Admin',
+      disabled: isEditingAdmin,  // Disable when editing existing admin
+      hidden: !isEditingAdmin    // Always hide during creation, only show when editing admin
+    },
+    {
+      value: UserRole.MANAGER,
+      label: 'Manager',
+      disabled: false,
+      hidden: false
+    },
+    {
+      value: UserRole.EMPLOYEE,
+      label: 'Employee',
+      disabled: false,
+      hidden: false
+    }
+  ]
 }
 
 const UserForm: React.FC<UserFormProps> = ({ user, users, onClose, onSuccess }) => {
@@ -35,6 +80,7 @@ const UserForm: React.FC<UserFormProps> = ({ user, users, onClose, onSuccess }) 
     firstName: '',
     lastName: '',
     email: '',
+    password: '',
     role: UserRole.EMPLOYEE,
     managerId: '',
     isManagerApprover: false
@@ -62,6 +108,7 @@ const UserForm: React.FC<UserFormProps> = ({ user, users, onClose, onSuccess }) 
         firstName: user.firstName,
         lastName: user.lastName,
         email: user.email,
+        password: '', // Not needed for updates
         role: user.role,
         managerId: user.managerId || '',
         isManagerApprover: user.isManagerApprover
@@ -74,6 +121,9 @@ const UserForm: React.FC<UserFormProps> = ({ user, users, onClose, onSuccess }) 
     (u.role === UserRole.MANAGER || u.role === UserRole.ADMIN) && 
     u.id !== user?.id
   )
+
+  // Get available roles based on existing users and editing context
+  const availableRoles = getAvailableRoles(users, user || null)
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {}
@@ -105,6 +155,17 @@ const UserForm: React.FC<UserFormProps> = ({ user, users, onClose, onSuccess }) 
       )
       if (existingUser) {
         newErrors.email = 'This email is already in use'
+      }
+    }
+
+    // Password validation (only for new users)
+    if (!user) {
+      if (!formData.password) {
+        newErrors.password = 'Password is required'
+      } else if (formData.password.length < 8) {
+        newErrors.password = 'Password must be at least 8 characters'
+      } else if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(formData.password)) {
+        newErrors.password = 'Password must contain uppercase, lowercase, and number'
       }
     }
 
@@ -183,6 +244,7 @@ const UserForm: React.FC<UserFormProps> = ({ user, users, onClose, onSuccess }) 
           firstName: formData.firstName.trim(),
           lastName: formData.lastName.trim(),
           email: formData.email.trim(),
+          password: formData.password,
           role: formData.role,
           managerId: formData.managerId || undefined,
           isManagerApprover: formData.isManagerApprover
@@ -264,25 +326,51 @@ const UserForm: React.FC<UserFormProps> = ({ user, users, onClose, onSuccess }) 
 
             {/* Email - only show when creating new user */}
             {!user && (
-              <div>
-                <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                  Email *
-                </label>
-                <input
-                  type="email"
-                  id="email"
-                  name="email"
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${
-                    errors.email ? 'border-red-300' : 'border-gray-300'
-                  }`}
-                  placeholder="Enter email address"
-                />
-                {errors.email && (
-                  <p className="mt-1 text-sm text-red-600">{errors.email}</p>
-                )}
-              </div>
+              <>
+                <div>
+                  <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+                    Email *
+                  </label>
+                  <input
+                    type="email"
+                    id="email"
+                    name="email"
+                    value={formData.email}
+                    onChange={handleInputChange}
+                    className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${
+                      errors.email ? 'border-red-300' : 'border-gray-300'
+                    }`}
+                    placeholder="Enter email address"
+                  />
+                  {errors.email && (
+                    <p className="mt-1 text-sm text-red-600">{errors.email}</p>
+                  )}
+                </div>
+
+                {/* Password - only show when creating new user */}
+                <div>
+                  <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+                    Password *
+                  </label>
+                  <input
+                    type="password"
+                    id="password"
+                    name="password"
+                    value={formData.password}
+                    onChange={handleInputChange}
+                    className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm ${
+                      errors.password ? 'border-red-300' : 'border-gray-300'
+                    }`}
+                    placeholder="Enter password (min 8 characters)"
+                  />
+                  {errors.password && (
+                    <p className="mt-1 text-sm text-red-600">{errors.password}</p>
+                  )}
+                  <p className="mt-1 text-xs text-gray-500">
+                    Must be at least 8 characters with uppercase, lowercase, and number
+                  </p>
+                </div>
+              </>
             )}
 
             {/* Role */}

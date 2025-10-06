@@ -9,9 +9,9 @@ const DashboardPage: React.FC = () => {
   const { user } = useAuth()
   const navigate = useNavigate()
   const { isMobile } = useResponsive()
-  
+
   // Enable approval notifications for managers and admins
-  useApprovalNotifications()
+  // useApprovalNotifications()
 
   return (
     <AppLayout title="Dashboard">
@@ -56,7 +56,7 @@ const DashboardPage: React.FC = () => {
         {/* Quick Actions */}
         <div className="bg-white shadow rounded-lg p-4 sm:p-6">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
-          
+
           {/* Common Actions */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
             <button
@@ -68,7 +68,7 @@ const DashboardPage: React.FC = () => {
               </svg>
               My Expenses
             </button>
-            
+
             {(user?.role === 'MANAGER' || user?.role === 'ADMIN') && (
               <button
                 onClick={() => navigate('/approvals')}

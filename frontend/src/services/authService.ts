@@ -57,12 +57,26 @@ export class AuthService {
 
   // Get current user info
   async getCurrentUser(): Promise<User> {
-    return api.get<User>('/auth/me')
+    const response = await api.get<{
+      status: string
+      message: string
+      data: User
+    }>('/auth/me')
+    return response.data
   }
 
   // Refresh access token
-  async refreshToken(refreshToken: string): Promise<{ accessToken: string }> {
-    return api.post<{ accessToken: string }>('/auth/refresh', { refreshToken })
+  async refreshToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
+    const response = await api.post<{
+      status: string
+      message: string
+      data: {
+        accessToken: string
+        refreshToken: string
+      }
+    }>('/auth/refresh', { refreshToken })
+    
+    return response.data
   }
 }
 

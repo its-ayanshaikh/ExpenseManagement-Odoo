@@ -1,6 +1,8 @@
 import { User } from '../models/User';
 import { UserRole } from '../types/database';
 import { db } from '../config/database';
+import { generateSecurePassword } from '../utils/password';
+import { EmailService } from './EmailService';
 
 export interface CreateUserDTO {
   companyId: string;
@@ -24,11 +26,45 @@ export interface UpdateUserDTO {
 
 export class UserService {
   /**
+   * Validate single admin constraint for a company
+   * @param companyId - Company ID
+   * @returns Promise<boolean> - True if only one admin exists
+   */
+  public static async validateSingleAdminConstraint(companyId: string): Promise<boolean> {
+    const adminCount = await db('users')
+      .where('company_id', companyId)
+      .where('role', UserRole.ADMIN)
+      .count('* as count')
+      .first() as unknown as { count: string } | undefined;
+
+    const count = adminCount ? Number(adminCount.count) : 0;
+    return count <= 1;
+  }
+
+  /**
+   * Check if user can create users (must be admin)
+   * @param userId - User ID
+   * @returns Promise<boolean> - True if user can create users
+   */
+  public static async canUserCreateUsers(userId: string): Promise<boolean> {
+    const user = await User.findById(userId);
+    if (!user) {
+      return false;
+    }
+    return user.role === UserRole.ADMIN;
+  }
+
+  /**
    * Create a new user
    * @param data - User creation data
    * @returns Promise<User> - Created user instance
    */
   public static async createUser(data: CreateUserDTO): Promise<User> {
+    // Prevent creating admin users through user creation (Requirement 2.9, 2.10)
+    if (data.role === UserRole.ADMIN) {
+      throw new Error('Cannot create admin users through user creation. Admin users are only created during company signup.');
+    }
+
     // Check if email already exists
     const existingUser = await User.findByEmail(data.email);
     if (existingUser) {
@@ -162,7 +198,7 @@ export class UserService {
       .where('approver_id', id)
       .where('status', 'PENDING')
       .count('* as count')
-      .first() as { count: string } | undefined;
+      .first() as unknown as { count: string } | undefined;
 
     if (pendingApprovals && Number(pendingApprovals.count) > 0) {
       throw new Error('Cannot delete user with pending approval requests');
@@ -173,7 +209,7 @@ export class UserService {
       .where('submitter_id', id)
       .where('status', 'PENDING')
       .count('* as count')
-      .first() as { count: string } | undefined;
+      .first() as unknown as { count: string } | undefined;
 
     if (pendingExpenses && Number(pendingExpenses.count) > 0) {
       throw new Error('Cannot delete user with pending expense submissions');
@@ -183,7 +219,7 @@ export class UserService {
     const managedUsers = await db('users')
       .where('manager_id', id)
       .count('* as count')
-      .first() as { count: string } | undefined;
+      .first() as unknown as { count: string } | undefined;
 
     if (managedUsers && Number(managedUsers.count) > 0) {
       throw new Error('Cannot delete user who is managing other users. Please reassign managed users first.');
@@ -213,7 +249,7 @@ export class UserService {
       const managedUsers = await db('users')
         .where('manager_id', userId)
         .count('* as count')
-        .first() as { count: string } | undefined;
+        .first() as unknown as { count: string } | undefined;
 
       if (managedUsers && Number(managedUsers.count) > 0) {
         throw new Error('Cannot change role to EMPLOYEE while user is managing other users. Please reassign managed users first.');
@@ -336,5 +372,35 @@ export class UserService {
     }
 
     return allUsers;
+  }
+
+  /**
+   * Generate secure password for user and send via email
+   * @param userId - User ID
+   * @returns Promise<string> - Generated password (for admin reference)
+   */
+  public static async generatePasswordAndSendEmail(userId: string): Promise<string> {
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Generate secure password
+    const password = generateSecurePassword(12);
+
+    // Set the new password
+    await user.setPassword(password);
+    await user.save();
+
+    // Send welcome email with password
+    try {
+      await EmailService.sendWelcomeEmail(user, password);
+    } catch (error) {
+      console.error('Failed to send welcome email:', error);
+      // Don't throw error here - password was set successfully
+      // Admin can manually share the password if email fails
+    }
+
+    return password;
   }
 }

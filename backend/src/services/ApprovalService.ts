@@ -347,6 +347,25 @@ export class ApprovalService {
       throw new Error('Comments are required for admin override');
     }
 
+    try {
+      // Import ExpenseService to avoid circular dependency
+      const { ExpenseService } = await import('./ExpenseService');
+      
+      // Convert currency before approving
+      await ExpenseService.convertExpenseCurrency(expenseId);
+    } catch (error) {
+      // Log the error but continue with approval
+      await ApprovalHistory.logAction(
+        expenseId,
+        'SYSTEM',
+        'CURRENCY_CONVERSION_WARNING',
+        `Currency conversion failed during admin override: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        { 
+          conversionError: error instanceof Error ? error.message : 'Unknown error'
+        }
+      );
+    }
+
     // Update expense status to approved
     await Expense.updateStatus(expenseId, ExpenseStatus.APPROVED);
 

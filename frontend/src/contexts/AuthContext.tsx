@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { User, Company, AuthResponse, LoginCredentials, SignupData } from '../types'
 import { authService } from '../services/authService'
-import useLocalStorage from '../hooks/useLocalStorage'
 
 interface AuthState {
   user: User | null
@@ -31,10 +30,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   
-  // Use localStorage hooks for token management
-  const [accessToken, setAccessToken] = useLocalStorage<string | null>('accessToken', null)
-  const [refreshToken, setRefreshToken] = useLocalStorage<string | null>('refreshToken', null)
-
+  // Check authentication status
+  // Note: We check localStorage directly to avoid stale state
+  const accessToken = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
   const isAuthenticated = !!user && !!accessToken
 
   // Clear error helper
@@ -48,9 +46,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       const response: AuthResponse = await authService.login(credentials)
       
-      // Store tokens
-      setAccessToken(response.accessToken)
-      setRefreshToken(response.refreshToken)
+      // Store tokens directly in localStorage (no JSON.stringify to avoid quotes)
+      localStorage.setItem('accessToken', response.accessToken)
+      localStorage.setItem('refreshToken', response.refreshToken)
       
       // Set user and company data
       setUser(response.user)
@@ -72,9 +70,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       const response: AuthResponse = await authService.signup(signupData)
       
-      // Store tokens
-      setAccessToken(response.accessToken)
-      setRefreshToken(response.refreshToken)
+      // Store tokens directly in localStorage (no JSON.stringify to avoid quotes)
+      localStorage.setItem('accessToken', response.accessToken)
+      localStorage.setItem('refreshToken', response.refreshToken)
       
       // Set user and company data
       setUser(response.user)
@@ -102,8 +100,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       console.error('Logout API call failed:', err)
     } finally {
       // Clear all auth data
-      setAccessToken(null)
-      setRefreshToken(null)
+      localStorage.removeItem('accessToken')
+      localStorage.removeItem('refreshToken')
       setUser(null)
       setCompany(null)
       setError(null)
@@ -121,10 +119,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setUser(userData)
     } catch (err: any) {
       console.error('Failed to refresh user data:', err)
-      // If refresh fails due to invalid token, logout
-      if (err.response?.status === 401) {
-        await logout()
-      }
+      // Don't auto-logout on refresh user errors
+      // Let the user stay logged in and see the error
+      // They can manually logout if needed
     } finally {
       setIsLoading(false)
     }
@@ -133,7 +130,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Initialize auth state on mount
   useEffect(() => {
     const initializeAuth = async () => {
-      if (accessToken) {
+      const storedToken = localStorage.getItem('accessToken')
+      
+      // Only try to fetch user if we have a token and no user data yet
+      if (storedToken && !user) {
         try {
           // Try to get current user data
           const userData = await authService.getCurrentUser()
@@ -144,10 +144,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           // For now, we'll leave company as null and handle it when needed
         } catch (err: any) {
           console.error('Failed to initialize auth:', err)
-          // If token is invalid, clear it
-          if (err.response?.status === 401) {
-            setAccessToken(null)
-            setRefreshToken(null)
+          // Only clear tokens if it's a 401 error (invalid token)
+          // For network errors or other issues, keep the user logged in
+          if (err?.response?.status === 401 || err?.statusCode === 401 || err?.type === 'AUTHENTICATION') {
+            localStorage.removeItem('accessToken')
+            localStorage.removeItem('refreshToken')
+            setUser(null)
+            setCompany(null)
           }
         }
       }
@@ -155,27 +158,45 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
 
     initializeAuth()
-  }, [accessToken, setAccessToken, setRefreshToken])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Auto-refresh token before expiration
   useEffect(() => {
-    if (!accessToken || !refreshToken) return
+    // Only set up refresh if we have both tokens
+    const storedAccessToken = localStorage.getItem('accessToken')
+    const storedRefreshToken = localStorage.getItem('refreshToken')
+    
+    if (!storedAccessToken || !storedRefreshToken) return
 
     // JWT tokens typically expire in 15 minutes (900 seconds)
     // Refresh 2 minutes before expiration (780 seconds)
     const refreshInterval = setInterval(async () => {
       try {
-        const response = await authService.refreshToken(refreshToken)
-        setAccessToken(response.accessToken)
-      } catch (err) {
+        const currentRefreshToken = localStorage.getItem('refreshToken')
+        if (!currentRefreshToken) {
+          clearInterval(refreshInterval)
+          return
+        }
+        
+        const response = await authService.refreshToken(currentRefreshToken)
+        localStorage.setItem('accessToken', response.accessToken)
+        localStorage.setItem('refreshToken', response.refreshToken)
+      } catch (err: any) {
         console.error('Token refresh failed:', err)
-        // If refresh fails, logout user
-        await logout()
+        // Only logout if it's a 401 error (invalid refresh token)
+        // Don't logout on network errors or other temporary issues
+        if (err?.response?.status === 401 || err?.statusCode === 401) {
+          clearInterval(refreshInterval)
+          await logout()
+        }
+        // For other errors, keep trying on next interval
       }
     }, 13 * 60 * 1000) // 13 minutes
 
     return () => clearInterval(refreshInterval)
-  }, [accessToken, refreshToken, setAccessToken])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
 
   const value: AuthContextType = {
     user,

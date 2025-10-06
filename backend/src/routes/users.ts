@@ -42,11 +42,85 @@ interface AssignManagerRequest {
 }
 
 /**
+ * POST /api/users/generate-password
+ * Generate secure password for user and send via email (Admin only)
+ */
+router.post('/generate-password', requireUserManagementPermission, enforceCompanyIsolation, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId } = req.body;
+
+    if (!userId) {
+      res.status(400).json({
+        status: 'error',
+        message: 'User ID is required',
+        code: 'MISSING_USER_ID'
+      });
+      return;
+    }
+
+    // Check if user exists and belongs to the same company
+    const user = await UserService.getUserById(userId);
+    if (!user) {
+      res.status(404).json({
+        status: 'error',
+        message: 'User not found',
+        code: 'USER_NOT_FOUND'
+      });
+      return;
+    }
+
+    // Ensure user belongs to the same company
+    if (!roleCheckers.belongsToCompany(user, req.user!.companyId)) {
+      res.status(403).json({
+        status: 'error',
+        message: 'Access denied. User belongs to a different company',
+        code: 'COMPANY_ACCESS_DENIED'
+      });
+      return;
+    }
+
+    // Generate password and send email
+    const password = await UserService.generatePasswordAndSendEmail(userId);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Password generated and email sent successfully',
+      data: {
+        userId: user.id,
+        email: user.email,
+        password: password, // Include password in response for admin reference
+        note: 'Password has been sent to user via email'
+      }
+    });
+
+  } catch (error) {
+    console.error('Generate password error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Internal server error during password generation',
+      code: 'PASSWORD_GENERATION_ERROR'
+    });
+  }
+});
+
+/**
  * POST /api/users
  * Create new user (Admin only)
  */
 router.post('/', requireUserManagementPermission, enforceCompanyIsolation, async (req: Request, res: Response): Promise<void> => {
   try {
+    // Check if user has permission to create users (Requirement 2.14, 2.15)
+    const canCreate = await UserService.canUserCreateUsers(req.user!.id);
+    if (!canCreate) {
+      res.status(403).json({
+        status: 'error',
+        message: 'Access denied. Only administrators can create users',
+        code: 'INSUFFICIENT_PERMISSIONS',
+        userRole: req.user!.role
+      });
+      return;
+    }
+
     const { email, password, firstName, lastName, role, managerId, isManagerApprover }: CreateUserRequest = req.body;
 
     // Validate required fields
@@ -77,6 +151,16 @@ router.post('/', requireUserManagementPermission, enforceCompanyIsolation, async
         status: 'error',
         message: 'Password must be at least 8 characters long',
         code: 'WEAK_PASSWORD'
+      });
+      return;
+    }
+
+    // Validate role - prevent creating admin users (Requirement 2.9, 2.10)
+    if (role === UserRole.ADMIN) {
+      res.status(400).json({
+        status: 'error',
+        message: 'Cannot create admin users through user creation. Admin users are only created during company signup.',
+        code: 'ADMIN_CREATION_NOT_ALLOWED'
       });
       return;
     }

@@ -1,11 +1,11 @@
 import { Expense } from '../models/Expense';
 import { User } from '../models/User';
 import { Company } from '../models/Company';
-import { CurrencyService } from './CurrencyService';
 import { WorkflowEngine } from './WorkflowEngine';
 import { ApprovalHistory } from '../models/ApprovalHistory';
-import { ExpenseStatus, UserRole } from '../types/database';
+import { ExpenseStatus, ExpenseCategory, UserRole } from '../types/database';
 import { db } from '../config/database';
+import { CurrencyService } from './CurrencyService';
 
 export interface CreateExpenseDTO {
   submitterId: string;
@@ -37,11 +37,11 @@ export interface ExpenseFilters {
 
 export class ExpenseService {
   /**
-   * Create a new expense with currency conversion
+   * Save expense as draft without submitting for approval
    * @param data - Expense creation data
-   * @returns Promise<Expense> - Created expense
+   * @returns Promise<Expense> - Created draft expense
    */
-  public static async createExpense(data: CreateExpenseDTO): Promise<Expense> {
+  public static async saveDraftExpense(data: CreateExpenseDTO): Promise<Expense> {
     // Validate submitter exists and belongs to the company
     const submitter = await User.findById(data.submitterId);
     if (!submitter) {
@@ -52,88 +52,99 @@ export class ExpenseService {
       throw new Error('Submitter does not belong to the specified company');
     }
 
-    // Get company to determine default currency
+    // Get company's default currency for conversion
     const company = await Company.findById(data.companyId);
     if (!company) {
       throw new Error('Company not found');
     }
 
-    // Convert amount to company default currency if different
+    // Convert amount to company's default currency
     let convertedAmount = data.amount;
-    let convertedCurrency = data.currency.toUpperCase();
+    const companyCurrency = company.defaultCurrency.toUpperCase();
+    const expenseCurrency = data.currency.toUpperCase();
 
-    if (data.currency.toUpperCase() !== company.defaultCurrency.toUpperCase()) {
+    if (expenseCurrency !== companyCurrency) {
       try {
-        // Validate currency codes before conversion
-        const isValidFromCurrency = await CurrencyService.validateCurrencyCode(data.currency);
-        const isValidToCurrency = await CurrencyService.validateCurrencyCode(company.defaultCurrency);
-        
-        if (!isValidFromCurrency) {
-          throw new Error(`Invalid source currency code: ${data.currency}`);
-        }
-        
-        if (!isValidToCurrency) {
-          throw new Error(`Invalid target currency code: ${company.defaultCurrency}`);
-        }
-
         convertedAmount = await CurrencyService.convertAmount(
           data.amount,
-          data.currency,
-          company.defaultCurrency
+          expenseCurrency,
+          companyCurrency
         );
-        convertedCurrency = company.defaultCurrency.toUpperCase();
-        
-        console.log(`Currency conversion: ${data.amount} ${data.currency} = ${convertedAmount} ${convertedCurrency}`);
       } catch (error) {
-        console.error('Currency conversion failed:', error);
-        
-        // Provide more specific error messages
-        if (error instanceof Error) {
-          if (error.message.includes('timeout')) {
-            throw new Error('Currency conversion service is temporarily unavailable. Please try again later.');
-          } else if (error.message.includes('not found')) {
-            throw new Error(`Exchange rate not available for ${data.currency} to ${company.defaultCurrency}. Please contact support.`);
-          } else if (error.message.includes('Invalid')) {
-            throw error; // Re-throw validation errors as-is
-          } else {
-            throw new Error(`Currency conversion failed: ${error.message}`);
-          }
-        } else {
-          throw new Error(`Failed to convert ${data.currency} to ${company.defaultCurrency}: Unknown error`);
-        }
+        console.error('Currency conversion error:', error);
+        // If conversion fails, use original amount as fallback
+        convertedAmount = data.amount;
       }
-    } else {
-      // Same currency, no conversion needed
-      convertedAmount = data.amount;
-      convertedCurrency = data.currency.toUpperCase();
     }
 
-    // Create expense instance
+    // Create expense instance as draft
     const expense = new Expense({
       company_id: data.companyId,
       submitter_id: data.submitterId,
       amount: data.amount,
-      currency: data.currency.toUpperCase(),
+      currency: expenseCurrency,
       category: data.category,
       description: data.description,
       expense_date: data.expenseDate,
       receipt_url: data.receiptUrl || null,
-      status: ExpenseStatus.PENDING,
+      status: ExpenseStatus.DRAFT,
       converted_amount: convertedAmount,
-      converted_currency: convertedCurrency.toUpperCase(),
+      converted_currency: companyCurrency,
     });
 
     // Save to database
     const savedExpense = await expense.save();
 
+    return savedExpense;
+  }
+
+  /**
+   * Submit a draft expense for approval
+   * Changes status to PENDING, category to WAITING_APPROVAL, and initiates workflow
+   * @param expenseId - Expense ID to submit
+   * @returns Promise<Expense> - Submitted expense
+   */
+  public static async submitExpense(expenseId: string): Promise<Expense> {
+    // Get existing expense
+    const expense = await Expense.findById(expenseId);
+    if (!expense) {
+      throw new Error('Expense not found');
+    }
+
+    // Check if expense is in draft status
+    if (expense.status !== ExpenseStatus.DRAFT) {
+      throw new Error('Only draft expenses can be submitted');
+    }
+
+    // Update status and category
+    expense.status = ExpenseStatus.PENDING;
+    expense.category = ExpenseCategory.WAITING_APPROVAL;
+
+    // Save updated expense
+    const updatedExpense = await expense.save();
+
     // Log expense submission
-    await ApprovalHistory.logSubmission(savedExpense.id, data.submitterId);
+    await ApprovalHistory.logSubmission(updatedExpense.id, updatedExpense.submitterId);
 
     // Initiate approval workflow
     const workflowEngine = new WorkflowEngine();
-    await workflowEngine.initiateWorkflow(savedExpense.id);
+    await workflowEngine.initiateWorkflow(updatedExpense.id);
 
-    return savedExpense;
+    return updatedExpense;
+  }
+
+  /**
+   * Create a new expense with currency conversion (legacy method for backward compatibility)
+   * @deprecated Use saveDraftExpense and submitExpense instead
+   * @param data - Expense creation data
+   * @returns Promise<Expense> - Created expense
+   */
+  public static async createExpense(data: CreateExpenseDTO): Promise<Expense> {
+    // Create as draft first
+    const draftExpense = await this.saveDraftExpense(data);
+    
+    // Then submit it
+    return await this.submitExpense(draftExpense.id);
   }
 
   /**
@@ -171,6 +182,39 @@ export class ExpenseService {
     }
 
     const expenses = await query.orderBy('created_at', 'desc');
+    return expenses.map(expense => Expense.fromDatabase(expense));
+  }
+
+  /**
+   * Get expenses by category for a user
+   * Filters by AMOUNT_TO_SUBMIT, WAITING_APPROVAL, or APPROVED categories
+   * @param userId - User ID
+   * @param category - Expense category
+   * @returns Promise<Expense[]> - Array of expenses in the specified category
+   */
+  public static async getExpensesByCategory(userId: string, category: ExpenseCategory): Promise<Expense[]> {
+    // Map category to status for filtering
+    let statusFilter: ExpenseStatus;
+    
+    switch (category) {
+      case ExpenseCategory.AMOUNT_TO_SUBMIT:
+        statusFilter = ExpenseStatus.DRAFT;
+        break;
+      case ExpenseCategory.WAITING_APPROVAL:
+        statusFilter = ExpenseStatus.PENDING;
+        break;
+      case ExpenseCategory.APPROVED:
+        statusFilter = ExpenseStatus.APPROVED;
+        break;
+      default:
+        throw new Error(`Invalid category: ${category}`);
+    }
+
+    const expenses = await db('expenses')
+      .where('submitter_id', userId)
+      .where('status', statusFilter)
+      .orderBy('created_at', 'desc');
+
     return expenses.map(expense => Expense.fromDatabase(expense));
   }
 
@@ -244,7 +288,7 @@ export class ExpenseService {
   }
 
   /**
-   * Update expense (only before approval)
+   * Update expense (only for draft expenses)
    * @param id - Expense ID
    * @param data - Update data
    * @param userId - User ID making the update
@@ -262,9 +306,9 @@ export class ExpenseService {
       throw new Error('Access denied. You can only update your own expenses');
     }
 
-    // Check if expense is still pending
-    if (expense.status !== ExpenseStatus.PENDING) {
-      throw new Error('Cannot update expense that has already been approved or rejected');
+    // Check if expense is still in draft status
+    if (expense.status !== ExpenseStatus.DRAFT) {
+      throw new Error('Cannot update expense that has been submitted. Only draft expenses can be updated');
     }
 
     // Update fields
@@ -287,66 +331,12 @@ export class ExpenseService {
       expense.receiptUrl = data.receiptUrl;
     }
 
-    // If amount or currency changed, recalculate conversion
-    if (data.amount !== undefined || data.currency !== undefined) {
-      const company = await Company.findById(expense.companyId);
-      if (!company) {
-        throw new Error('Company not found');
-      }
-
-      if (expense.currency !== company.defaultCurrency.toUpperCase()) {
-        try {
-          // Validate currency codes before conversion
-          const isValidFromCurrency = await CurrencyService.validateCurrencyCode(expense.currency);
-          const isValidToCurrency = await CurrencyService.validateCurrencyCode(company.defaultCurrency);
-          
-          if (!isValidFromCurrency) {
-            throw new Error(`Invalid source currency code: ${expense.currency}`);
-          }
-          
-          if (!isValidToCurrency) {
-            throw new Error(`Invalid target currency code: ${company.defaultCurrency}`);
-          }
-
-          expense.convertedAmount = await CurrencyService.convertAmount(
-            expense.amount,
-            expense.currency,
-            company.defaultCurrency
-          );
-          expense.convertedCurrency = company.defaultCurrency.toUpperCase();
-          
-          console.log(`Currency conversion on update: ${expense.amount} ${expense.currency} = ${expense.convertedAmount} ${expense.convertedCurrency}`);
-        } catch (error) {
-          console.error('Currency conversion failed during update:', error);
-          
-          // Provide more specific error messages
-          if (error instanceof Error) {
-            if (error.message.includes('timeout')) {
-              throw new Error('Currency conversion service is temporarily unavailable. Please try again later.');
-            } else if (error.message.includes('not found')) {
-              throw new Error(`Exchange rate not available for ${expense.currency} to ${company.defaultCurrency}. Please contact support.`);
-            } else if (error.message.includes('Invalid')) {
-              throw error; // Re-throw validation errors as-is
-            } else {
-              throw new Error(`Currency conversion failed: ${error.message}`);
-            }
-          } else {
-            throw new Error(`Failed to convert ${expense.currency} to ${company.defaultCurrency}: Unknown error`);
-          }
-        }
-      } else {
-        // Same currency, no conversion needed
-        expense.convertedAmount = expense.amount;
-        expense.convertedCurrency = expense.currency;
-      }
-    }
-
-    // Save updated expense
+    // Save updated expense (no currency conversion for drafts)
     return await expense.save();
   }
 
   /**
-   * Delete expense (only before approval)
+   * Delete expense (only for draft expenses)
    * @param id - Expense ID
    * @param userId - User ID making the deletion
    * @returns Promise<boolean> - True if deleted successfully
@@ -363,9 +353,9 @@ export class ExpenseService {
       throw new Error('Access denied. You can only delete your own expenses');
     }
 
-    // Check if expense is still pending
-    if (expense.status !== ExpenseStatus.PENDING) {
-      throw new Error('Cannot delete expense that has already been approved or rejected');
+    // Check if expense is still in draft status
+    if (expense.status !== ExpenseStatus.DRAFT) {
+      throw new Error('Cannot delete expense that has been submitted. Only draft expenses can be deleted');
     }
 
     // Delete expense
@@ -467,5 +457,101 @@ export class ExpenseService {
     }
 
     return false;
+  }
+
+  /**
+   * Convert expense currency to company's base currency
+   * Called during approval process to store the converted amount
+   * @param expenseId - Expense ID
+   * @returns Promise<number> - Converted amount in company's base currency
+   */
+  public static async convertExpenseCurrency(expenseId: string): Promise<number> {
+    const expense = await Expense.findById(expenseId);
+    if (!expense) {
+      throw new Error('Expense not found');
+    }
+
+    const company = await Company.findById(expense.companyId);
+    if (!company) {
+      throw new Error('Company not found');
+    }
+
+    // If expense is already in company currency, no conversion needed
+    if (expense.currency.toUpperCase() === company.defaultCurrency.toUpperCase()) {
+      // Update the expense with the same amount as converted amount
+      expense.convertedAmount = expense.amount;
+      expense.convertedCurrency = company.defaultCurrency.toUpperCase();
+      await expense.save();
+      
+      // Log that no conversion was needed
+      await ApprovalHistory.logAction(
+        expenseId,
+        'SYSTEM',
+        'CURRENCY_CONVERSION',
+        'No conversion needed - expense already in company currency',
+        {
+          originalAmount: expense.amount,
+          originalCurrency: expense.currency,
+          convertedAmount: expense.amount,
+          convertedCurrency: company.defaultCurrency,
+          exchangeRate: 1
+        }
+      );
+      
+      return expense.amount;
+    }
+
+    try {
+      // Fetch exchange rates (with caching)
+      const exchangeRate = await CurrencyService.getExchangeRate(
+        expense.currency,
+        company.defaultCurrency
+      );
+
+      // Convert the amount
+      const convertedAmount = await CurrencyService.convertAmount(
+        expense.amount,
+        expense.currency,
+        company.defaultCurrency
+      );
+
+      // Update the expense with converted amount
+      expense.convertedAmount = convertedAmount;
+      expense.convertedCurrency = company.defaultCurrency.toUpperCase();
+      await expense.save();
+
+      // Log the currency conversion
+      await ApprovalHistory.logAction(
+        expenseId,
+        'SYSTEM',
+        'CURRENCY_CONVERSION',
+        `Converted ${expense.amount} ${expense.currency} to ${convertedAmount} ${company.defaultCurrency}`,
+        {
+          originalAmount: expense.amount,
+          originalCurrency: expense.currency,
+          convertedAmount,
+          convertedCurrency: company.defaultCurrency,
+          exchangeRate
+        }
+      );
+
+      return convertedAmount;
+    } catch (error) {
+      // Log the conversion failure
+      await ApprovalHistory.logAction(
+        expenseId,
+        'SYSTEM',
+        'CURRENCY_CONVERSION_FAILED',
+        `Failed to convert currency: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        {
+          originalAmount: expense.amount,
+          originalCurrency: expense.currency,
+          targetCurrency: company.defaultCurrency,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        }
+      );
+
+      throw new Error(`Currency conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 }

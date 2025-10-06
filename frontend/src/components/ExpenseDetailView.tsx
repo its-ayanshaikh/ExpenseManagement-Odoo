@@ -47,7 +47,8 @@ const ExpenseDetailView: React.FC<ExpenseDetailViewProps> = ({ expenseId, onBack
     }
 
     fetchData()
-  }, [expenseId, loadExpense, loadHistory])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expenseId])
 
   // Get status badge styling
   const getStatusBadge = (status: ExpenseStatus) => {
@@ -114,7 +115,7 @@ const ExpenseDetailView: React.FC<ExpenseDetailViewProps> = ({ expenseId, onBack
           </div>
           <div className="ml-3">
             <h3 className="text-sm font-medium text-red-800">Error loading expense details</h3>
-            <p className="mt-1 text-sm text-red-700">{expenseError || historyError}</p>
+            <p className="mt-1 text-sm text-red-700">{(expenseError || historyError)?.message}</p>
           </div>
         </div>
       </div>

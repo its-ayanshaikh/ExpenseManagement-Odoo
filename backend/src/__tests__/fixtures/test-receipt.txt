@@ -1,0 +1,5 @@
+RECEIPT
+Amount: $45.99
+Date: 2024-01-15
+Merchant: Test Store
+Category: Office Supplies

@@ -6,9 +6,16 @@ export enum UserRole {
 }
 
 export enum ExpenseStatus {
+  DRAFT = 'DRAFT',
   PENDING = 'PENDING',
   APPROVED = 'APPROVED',
   REJECTED = 'REJECTED',
+}
+
+export enum ExpenseCategory {
+  AMOUNT_TO_SUBMIT = 'AMOUNT_TO_SUBMIT',  // Draft expenses
+  WAITING_APPROVAL = 'WAITING_APPROVAL',  // Submitted, pending approval
+  APPROVED = 'APPROVED',                   // Approved expenses
 }
 
 export enum ApprovalRequestStatus {
@@ -73,6 +80,7 @@ export interface ApprovalRule {
   percentage_threshold: number | null;
   specific_approver_id: string | null;
   is_hybrid: boolean;
+  is_sequential_approval: boolean;
   priority: number;
   created_at: Date;
   updated_at: Date;
@@ -82,6 +90,7 @@ export interface ApprovalRuleApprover {
   id: string;
   approval_rule_id: string;
   approver_id: string;
+  is_required: boolean;
   sequence: number;
   created_at: Date;
 }

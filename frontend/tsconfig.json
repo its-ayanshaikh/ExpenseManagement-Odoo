@@ -17,6 +17,8 @@
     "noFallthroughCasesInSwitch": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
+    "sourceMap": true,
+    "inlineSourceMap": false,
     "types": ["vite/client"]
   },
   "include": ["src"],

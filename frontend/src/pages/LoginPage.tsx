@@ -28,12 +28,13 @@ const LoginPage: React.FC = () => {
     resolver: zodResolver(loginSchema),
   })
 
-  // Redirect if already authenticated
+  // Redirect if already authenticated (only on mount)
   useEffect(() => {
-    if (isAuthenticated) {
-      navigate('/dashboard')
+    if (isAuthenticated && !isLoading) {
+      navigate('/dashboard', { replace: true })
     }
-  }, [isAuthenticated, navigate])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Clear auth error when component mounts
   useEffect(() => {

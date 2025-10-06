@@ -22,6 +22,8 @@ export const useApprovalNotifications = () => {
     enabled: shouldFetch,
     refetchInterval: 30000, // Poll every 30 seconds
     refetchIntervalInBackground: false,
+    retry: 1, // Only retry once to avoid multiple failed requests
+    retryDelay: 5000, // Wait 5 seconds before retrying
   })
 
   // Track previous count to detect new approvals

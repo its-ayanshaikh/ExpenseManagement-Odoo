@@ -18,10 +18,10 @@ apiClient.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
-    
+
     // Add request timestamp for timeout tracking
-    ;(config as any).metadata = { startTime: new Date() }
-    
+    ; (config as any).metadata = { startTime: new Date() }
+
     return config
   },
   (error) => {
@@ -32,13 +32,19 @@ apiClient.interceptors.request.use(
 
 // Response interceptor to handle token refresh and errors
 apiClient.interceptors.response.use(
-  (response: AxiosResponse) => {
+  async (response: AxiosResponse) => {
     // Log response time in development
     if (isDevelopment() && (response.config as any).metadata?.startTime) {
       const duration = new Date().getTime() - (response.config as any).metadata.startTime.getTime()
-      console.log(`API ${response.config.method?.toUpperCase()} ${response.config.url} - ${duration}ms`)
+      const { logger } = await import('../utils/logger')
+      logger.api(
+        response.config.method?.toUpperCase() || 'UNKNOWN',
+        response.config.url || '',
+        duration,
+        response.status
+      )
     }
-    
+
     return response
   },
   async (error: AxiosError) => {
@@ -47,36 +53,37 @@ apiClient.interceptors.response.use(
     // Log error details
     logError(error, `API ${originalRequest?.method?.toUpperCase()} ${originalRequest?.url}`)
 
-    // Handle 401 errors (token expired)
+    // Handle 401 errors (token expired) - but ONLY for authentication endpoints
+    // For other endpoints, let the error propagate without auto-logout
     if (error.response?.status === 401 && originalRequest && !(originalRequest as any)._retry) {
-      (originalRequest as any)._retry = true
+      const isAuthEndpoint = originalRequest.url?.includes('/auth/')
 
-      try {
-        const refreshToken = localStorage.getItem('refreshToken')
-        if (refreshToken) {
-          const response = await axios.post(`${config.apiBaseUrl}/auth/refresh`, {
-            refreshToken,
-          })
+      // Only attempt token refresh if we have a refresh token and it's not already a refresh request
+      if (!isAuthEndpoint && !originalRequest.url?.includes('/auth/refresh')) {
+        (originalRequest as any)._retry = true
 
-          const { accessToken } = response.data
-          localStorage.setItem('accessToken', accessToken)
+        try {
+          const refreshToken = localStorage.getItem('refreshToken')
+          if (refreshToken) {
+            const response = await axios.post(`${config.apiBaseUrl}/auth/refresh`, {
+              refreshToken,
+            })
 
-          // Retry original request with new token
-          originalRequest.headers = originalRequest.headers || {}
-          originalRequest.headers.Authorization = `Bearer ${accessToken}`
-          return apiClient(originalRequest)
+            const { accessToken, refreshToken: newRefreshToken } = response.data.data
+            localStorage.setItem('accessToken', accessToken)
+            localStorage.setItem('refreshToken', newRefreshToken)
+
+            // Retry original request with new token
+            originalRequest.headers = originalRequest.headers || {}
+            originalRequest.headers.Authorization = `Bearer ${accessToken}`
+            return apiClient(originalRequest)
+          }
+        } catch (refreshError: any) {
+          // If refresh fails with 401, it means the refresh token is invalid
+          // In this case, just let the error propagate - don't force logout here
+          // The AuthContext will handle logout when appropriate
+          console.error('Token refresh failed:', refreshError)
         }
-      } catch (refreshError) {
-        // Refresh failed, clear tokens and redirect to login
-        localStorage.removeItem('accessToken')
-        localStorage.removeItem('refreshToken')
-        
-        // Only redirect if we're not already on the login page
-        if (window.location.pathname !== '/login') {
-          window.location.href = '/login'
-        }
-        
-        return Promise.reject(refreshError)
       }
     }
 
@@ -136,10 +143,10 @@ export class ApiClient {
 
   // File upload request with progress tracking
   async uploadFile<T>(
-    url: string, 
-    file: File, 
-    config?: AxiosRequestConfig & { 
-      onUploadProgress?: (progressEvent: any) => void 
+    url: string,
+    file: File,
+    config?: AxiosRequestConfig & {
+      onUploadProgress?: (progressEvent: any) => void
     }
   ): Promise<T> {
     try {
@@ -164,10 +171,10 @@ export class ApiClient {
   async batch<T>(requests: Array<() => Promise<any>>): Promise<T[]> {
     try {
       const results = await Promise.allSettled(requests.map(req => req()))
-      
+
       const errors: AppError[] = []
       const data: T[] = []
-      
+
       results.forEach((result, index) => {
         if (result.status === 'fulfilled') {
           data[index] = result.value
@@ -175,12 +182,12 @@ export class ApiClient {
           errors.push(parseApiError(result.reason))
         }
       })
-      
+
       if (errors.length > 0) {
         // If any requests failed, throw the first error
         throw errors[0]
       }
-      
+
       return data
     } catch (error) {
       throw this.handleError(error, 'BATCH', 'multiple endpoints')
@@ -188,20 +195,21 @@ export class ApiClient {
   }
 
   // Enhanced error handling
-  private handleError(error: unknown, method: string, url: string): AppError {
+  private async handleError(error: unknown, method: string, url: string): Promise<AppError> {
     const appError = parseApiError(error)
-    
+
     // Add context information
     const enhancedError: AppError = {
       ...appError,
       details: appError.details || `${method} ${url}`,
     }
-    
-    // Log error in development
+
+    // Log error
     if (isDevelopment()) {
-      console.error(`API Error [${method} ${url}]:`, enhancedError)
+      const { logger } = await import('../utils/logger')
+      logger.error(`API Error [${method} ${url}]`, enhancedError)
     }
-    
+
     return enhancedError
   }
 
